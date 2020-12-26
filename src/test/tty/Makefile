@@ -1,7 +1,8 @@
 CC=gcc
 CFLAGS=-I../../lib -D UNIX -D LINUX -D UNIX_CONSOLE
 LDFLAGS=
-OBJDIR=obj
+
+EXECUTABLE=tty
 
 SOURCES= main.c \
 ../../lib/c_cache.c \
@@ -10,10 +11,7 @@ SOURCES= main.c \
 ../../lib/c_tty.c \
 ../../lib/nprintf.c
 
-#OBJECTS := $(patsubst ../../lib/%, ./%, $(SOURCES:.c=.o))
 OBJECTS=$(notdir $(SOURCES:%.c=%.o))
-#OBJECTS=$(SOURCES:.c=.o)
-EXECUTABLE=tty
 
 all:  $(EXECUTABLE)
 

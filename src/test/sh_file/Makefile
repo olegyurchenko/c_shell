@@ -1,19 +1,15 @@
 CC=gcc
 CFLAGS=-I../../lib -D UNIX -D LINUX
 LDFLAGS=
-OBJDIR=obj
+
+EXECUTABLE=sh_file
 
 SOURCES= main.c \
 ../../lib/c_cache.c \
-../../lib/loop_buff.c \
 ../../lib/c_sh.c \
-../../lib/c_tty.c \
 ../../lib/nprintf.c
 
-#OBJECTS := $(patsubst ../../lib/%, ./%, $(SOURCES:.c=.o))
 OBJECTS=$(notdir $(SOURCES:%.c=%.o))
-#OBJECTS=$(SOURCES:.c=.o)
-EXECUTABLE=sh_file
 
 all:  test
 
