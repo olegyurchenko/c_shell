@@ -18,7 +18,7 @@ typedef struct {
     PASSWORD_MODE,
     SHELL_MODE
   } mode;
-
+  int watchdog;
   char user[MAX_USER_LENGTH];
   int terminated : 1;
   int telnet_settings : 1;

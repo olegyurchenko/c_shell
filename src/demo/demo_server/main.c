@@ -136,6 +136,33 @@ static int print_cb(void *arg, int c)
   return 1;
 }
 /*----------------------------------------------------------------------------*/
+static int step_cb(void *arg, int argc, char **argv)
+{
+  SHELL_DATA *data;
+  int r = SHELL_OK;
+
+  (void) argc;
+  (void) argv;
+
+  data = (SHELL_DATA *) arg;
+
+/*Wathdog
+ * For such a wretched server, I had to do a watchdog
+ * so that none of the users hung up the system in an endless loop
+ * such a
+ * while thue; do done
+*/
+
+  data->watchdog ++;
+  if(data->watchdog > 1000) {
+    shell_printf(data->sh, "Wachdog triggered\n");
+    fprintf(stderr, "Wachdog triggered\n");
+    r = SHELL_STACK_ERROR;
+  }
+
+  return r;
+}
+/*----------------------------------------------------------------------------*/
 void on_new_connection(SHELL_DATA *data)
 {
   char telnet_settings[] = {
@@ -155,6 +182,7 @@ void on_new_connection(SHELL_DATA *data)
   data->sh = shell_alloc();
   //TODO: check for NULL
   shell_set_print_cb(data->sh, print_cb, data);
+  shell_set_step_cb(data->sh, step_cb, data);
 
   //Write telnet client settings
   write(data->fd, telnet_settings, sizeof (telnet_settings));
@@ -184,6 +212,8 @@ void on_rx(SHELL_DATA *data)
     data->telnet_settings = 0;
     return;
   }
+
+  data->watchdog = 0; //watchdog reset
 
   for(i = 0; i < len; i++) {
     c = buffer[i];
