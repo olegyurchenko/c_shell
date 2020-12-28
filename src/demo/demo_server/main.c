@@ -1,5 +1,22 @@
-#include <netinet/in.h>
-#include <unistd.h>
+#ifdef WIN32
+#include <winsock2.h>
+#include <windows.h>
+typedef int socklen_t;
+
+static void bzero(void *s, size_t  n ) {
+  memset(s, 0, n);
+}
+#endif
+
+
+#ifdef UNIX
+  #include <unistd.h>
+  #include <netinet/in.h>
+
+  typedef int SOCKET;
+  #define closesocket(sd) close(sd)
+#endif
+
 
 #include "shell.h"
 
@@ -7,7 +24,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef max
 #define max(a,b) ((a)>(b)?(a):(b))
+#endif
+
 #define PORT 4423
 #define MAX_CONNECTIONS 16
 
@@ -19,6 +39,18 @@ void on_rx(SHELL_DATA *);
 void on_close(SHELL_DATA *);
 
 
+static void sock_init(void)
+{
+#ifdef WIN32
+  WORD wVersionRequested;
+  WSADATA wsaData;
+  int err;
+
+  wVersionRequested = MAKEWORD( 2, 0 );
+
+  err = WSAStartup(wVersionRequested, &wsaData);
+#endif /*WIN32*/
+}
 /*----------------------------------------------------------------------------*/
 int main()
 {
@@ -27,6 +59,7 @@ int main()
   socklen_t len;
   struct sockaddr_in cliaddr, servaddr;
 
+  sock_init();
   /* create listening TCP socket */
   listenfd = socket(AF_INET, SOCK_STREAM, 0);
   bzero(&servaddr, sizeof(servaddr));
@@ -80,7 +113,7 @@ int main()
       if(FD_ISSET(connections[i].fd, &eset) || connections[i].terminated) {
         //Handle ERROR or EXIT event
         on_close(&connections[i]);
-        close(connections[i].fd);
+        closesocket(connections[i].fd);
         fprintf(stdout, "Connection %d closed\n", i);
 
         //Remove connection
@@ -107,7 +140,7 @@ int main()
           connection_count ++;
 
         } else {
-          close(connfd);
+          closesocket(connfd);
         }
       }
     }
@@ -122,14 +155,14 @@ static int print_cb(void *arg, int c)
   conn = (SHELL_DATA *) arg;
   if (c == '\n') {
     buffer = '\r';
-    if(write(conn->fd, &buffer, 1) < 1) {
+    if(send(conn->fd, &buffer, 1, 0) < 1) {
       conn->terminated = 1;
       return -1;
     }
   }
 
   buffer = (char) c;
-  if(write(conn->fd, &buffer, 1) <= 0) {
+  if(send(conn->fd, &buffer, 1, 0) <= 0) {
     conn->terminated  = 1;
     return -1;
   }
@@ -185,7 +218,7 @@ void on_new_connection(SHELL_DATA *data)
   shell_set_step_cb(data->sh, step_cb, data);
 
   //Write telnet client settings
-  write(data->fd, telnet_settings, sizeof (telnet_settings));
+  send(data->fd, telnet_settings, sizeof (telnet_settings), 0);
   //For read telnet client answer
   data->telnet_settings = 1;
 
@@ -202,7 +235,7 @@ void on_rx(SHELL_DATA *data)
   char buffer[1024];
   int i, len, c;
 
-  len = read(data->fd, buffer, sizeof(buffer));
+  len = recv(data->fd, buffer, sizeof(buffer), 0);
   if(len <= 0) {
     data->terminated = 0;
     return;
@@ -218,7 +251,8 @@ void on_rx(SHELL_DATA *data)
   for(i = 0; i < len; i++) {
     c = buffer[i];
     if(c == '\r') {
-      c = '\n';
+      //c = '\n';
+      continue; //WIndows telnet
     }
     tty_rx(data->tty, c);
   }

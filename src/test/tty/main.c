@@ -230,7 +230,7 @@ int main(int argc, char ** argv)
   tty_set_enter_cb(data.tty, enter_cb, &data);
 
   while (!terminated) {
-    int c = getchar();
+    int c = console_getchar();
     if (c > 0 && c <= 255) {
       if (c == '\r') {
         c = '\n';
