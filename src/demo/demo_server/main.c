@@ -237,7 +237,7 @@ void on_rx(SHELL_DATA *data)
 
   len = recv(data->fd, buffer, sizeof(buffer), 0);
   if(len <= 0) {
-    data->terminated = 0;
+    data->terminated = 1;
     return;
   }
 
