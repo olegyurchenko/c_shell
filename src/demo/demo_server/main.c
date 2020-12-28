@@ -250,9 +250,12 @@ void on_rx(SHELL_DATA *data)
 
   for(i = 0; i < len; i++) {
     c = buffer[i];
+    if(c == '\n') {
+      continue; //win telnet ?
+    }
+
     if(c == '\r') {
-      //c = '\n';
-      continue; //WIndows telnet
+      c = '\n';
     }
     tty_rx(data->tty, c);
   }
