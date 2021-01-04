@@ -1,6 +1,12 @@
 # c_shell - Lightweight shell for embedded projects
 
+Somehow I needed to embed a nice wrapper in a hardware project for administrative purposes like setting date, setting up network, etc.
 
+Main library modules - 
+
+- c_tty.c - Character User Interface. Provides command line editing, saving command history, etc.
+
+- c_sh.c - shell, provides command inlining and execution of primitive shell-like scripts.
 
 ## c_tty -  Character User Interface
 
@@ -14,26 +20,7 @@ c_tty supports basic line editing, understanding the keys:
 
 ## c_sh - shell for embedding your commands
 
-Built-in commands:
+Built-in commands: "exit", "quit", "break", "continue", "if", "then", "fi", "else", "elif", "true", "false", "while", "until", "for", "do", "done", "echo", "test", "[", "[[", "set"
 
-- "exit"
-- "quit"
-- "break"
-- "continue"
-- "if"
-- "then"
-- "fi"
-- "else"
-- "elif"
-- "true"
-- "false"
-- "while"
-- "until"
-- "for"
-- "do"
-- "done"
-- "echo"
-- "test"
-- "["
-- "[["
-- "set"
+
+
