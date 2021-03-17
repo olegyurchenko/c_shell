@@ -5,7 +5,7 @@
 /**
 * Simple shell.
 *
-* (C) Oleg Yurchenko, Kiev, Ukraine 2020.<br>
+* (C) T&T team, Kiev, Ukraine 2020.<br>
 * started 08.12.2020 11:29:31<br>
 * @pkgdoc c_sh
 * @author oleg
@@ -1111,10 +1111,12 @@ static int _exec(C_SHELL *sh, int argc, char **argv)
 
 
     r = embed_exec(sh, argc, &argv[argc0]);
-    if(r == SHELL_ERR_COMMAND_NOT_FOUND
-       && is_true_condition(sh)
-       && sh->exec_cb.cb != NULL) {
-      r = sh->exec_cb.cb(sh->exec_cb.arg, argc, &argv[argc0]);
+    if(r == SHELL_ERR_COMMAND_NOT_FOUND) {
+      if(is_true_condition(sh) && sh->exec_cb.cb != NULL) {
+        r = sh->exec_cb.cb(sh->exec_cb.arg, argc, &argv[argc0]);
+      } else {
+        r = SHELL_OK;
+      }
     }
 
   } while (0);
