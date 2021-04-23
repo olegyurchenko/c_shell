@@ -12,7 +12,7 @@
 * -  Ctrl-C to ditch the entire line,
 * - Up and Down arrow for select line from history buffer.<br>
 * - Tab  to tab Completion
-* (C) Oleg Yurchenko, Kiev, Ukraine 2020.<br>
+* (C) T&T team, Kiev, Ukraine 2020.<br>
 * started 04.12.2020 11:33:36<br>
 * @pkgdoc c_tty
 * @author oleg
@@ -608,6 +608,81 @@ static int intern_tab_cb(void *arg, const char *text, unsigned size)
   if(kw_matched > 1) {
     tty_putc(tty, '\n');
     for(i = 0; NULL != (kw = tty->tab_cb.kw_cb(tty->tab_cb.arg, i)); i ++) {
+      if(strstr(kw, text) == kw) {
+        tty_printf(tty, "%s\n", kw);
+      }
+    }
+
+    for(i = size; i < char_mathced; i++) {
+      tty_ins(tty, cmd[i]);
+    }
+
+    tty_restore(tty);
+  }
+
+  return 0;
+}
+/*----------------------------------------------------------------------------*/
+/**
+ * @brief tty_tab_completion - run tab completion with known keywords
+ * @param tty - TTY handle
+ * @param text - not complete text
+ * @param size - text size
+ * @param keywords - keywords
+ * @param kw_size - keywords list size
+ * @return -1 if error
+ */
+int tty_tab_completion(TTY *tty, const char *text, unsigned size, const char **keywords, unsigned kw_size)
+{
+  unsigned i, j, kw_matched = 0, char_mathced=0xffffffff;
+  const char *cmd = NULL, *kw;
+
+  if(keywords == NULL || !kw_size) {
+    return 0;
+  }
+
+
+  if(size >= 1) {
+    i = size - 1;
+    while (i) {
+      if(text[i] == ' ' || text[i] == ';') {
+        text = text + i + 1;
+        size -= i + 1;
+        break;
+      }
+      i --;
+    }
+  }
+
+  if(size >= 1) {
+    for(i = 0; i < kw_size &&  NULL != (kw = keywords[i]); i ++) {
+      if(strstr(kw, text) == kw) {
+        if(cmd != NULL) {
+          j = 0;
+          while(cmd[j] && cmd[j] == kw[j]) {
+            j ++;
+          }
+          if(char_mathced > j) {
+            char_mathced = j;
+          }
+        }
+        cmd = kw;
+        kw_matched ++;
+      }
+    }
+  }
+
+  if(kw_matched == 1) {
+    i = size;
+    size = strlen(cmd);
+    for(; i < size; i++) {
+      tty_ins(tty, cmd[i]);
+    }
+  }
+
+  if(kw_matched > 1) {
+    tty_putc(tty, '\n');
+    for(i = 0; i < kw_size &&  NULL != (kw = keywords[i]); i ++) {
       if(strstr(kw, text) == kw) {
         tty_printf(tty, "%s\n", kw);
       }

@@ -12,7 +12,7 @@
 * -  Ctrl-C to ditch the entire line,
 * - Up and Down arrow for select line from history buffer.<br>
 * - Tab  to tab Completion
-* (C) Oleg Yurchenko, Kiev, Ukraine 2020.<br>
+* (C) T&T team, Kiev, Ukraine 2020.<br>
 * started 04.12.2020 11:33:36<br>
 * @pkgdoc c_tty
 * @author oleg
@@ -250,6 +250,18 @@ void tty_restore(TTY *tty);
  * @param child - tty interceptor
  */
 void tty_set_interceptor(TTY *tty, TTY *interceptor);
+
+/**
+ * @brief tty_tab_completion - run tab completion with known keywords
+ * @param tty - TTY handle
+ * @param text - not complete text
+ * @param size - text size
+ * @param keywords - keywords
+ * @param kw_size - keywords list size
+ * @return -1 if error
+ */
+int tty_tab_completion(TTY *tty, const char *text, unsigned size, const char **keywords, unsigned kw_size);
+
 
 #if defined(WIN_CONSOLE) || defined(UNIX_CONSOLE)
 /**Native windows & unix console functions wrappers*/
