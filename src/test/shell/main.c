@@ -24,7 +24,6 @@ int print_cb(void *arg, int c)
 
 int enter_cb(void *arg, const char *text, unsigned size)
 {
-  unsigned i;
   int r;
   TEST_SHELL_DATA *ts;
 
@@ -60,6 +59,7 @@ int prompt_cb(void *arg, char *buffer, unsigned buffer_size) {
   else {
     snprintf(buffer, buffer_size, "shell$ ");
   }
+  return 0;
 }
 
 
@@ -160,7 +160,6 @@ int shell_exec(void *arg, int argc, char **argv)
     if(!strcmp(argv[0], ".")) {
       return exec_files(arg, argc, argv);
     }
-
   }
 
 
@@ -169,17 +168,9 @@ int shell_exec(void *arg, int argc, char **argv)
 
 int main(int argc, char ** argv)
 {
-  int r;
   TEST_SHELL_DATA data;
 
-  (void) argc;
-  (void) argv;
 
-
-  if (!console_isatty()) {
-    fprintf(stderr, "%s must run on a tty\n", argv[0]);
-    return 1;
-  }
 
   data.tty = tty_alloc(TTY_DEFAULT_INPUT_SIZE, TTY_DEFAULT_HISTORE_SIZE, TTY_DEFAULT_PROMPT_SIZE);
   tty_set_echo_mode(data.tty, 1);
@@ -194,6 +185,14 @@ int main(int argc, char ** argv)
   shell_set_exec_cb(data.sh, shell_exec, &data);
   shell_set_step_cb(data.sh, step_cb, &data);
 
+  if(argc > 1) {
+    return exec_files(&data, argc, argv);
+  }
+
+  if (!console_isatty()) {
+    fprintf(stderr, "%s must run on a tty\n", argv[0]);
+    return 1;
+  }
   setup_console();
 
   tty_printf(data.tty, "%s\n", "Use 'quit' or 'exit' to quit.");
