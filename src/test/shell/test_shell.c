@@ -44,6 +44,27 @@ static const char *shell_commands[] = {
   , "read" //test
 };
 /*----------------------------------------------------------------------------*/
+typedef struct {
+  SHELL_STREAM_HANDLER handler;
+} stream_handler_t;
+
+static stream_handler_t stream_handler;
+static int _open(void *data, const char* name, SHELL_STREAM_MODE mode);
+static int _close(void *data, int f);
+static int _read(void *data, int f, void* buf, unsigned size);
+static int _write(void *data, int f, const void* buf, unsigned size);
+/*----------------------------------------------------------------------------*/
+void ts_init(TEST_SHELL_DATA *data)
+{
+  memset(&stream_handler, 0, sizeof(stream_handler_t));
+  stream_handler.handler.data = &stream_handler;
+  stream_handler.handler._open = _open;
+  stream_handler.handler._close = _close;
+  stream_handler.handler._read = _read;
+  stream_handler.handler._write = _write;
+  shell_set_stream_handler(data->sh, &stream_handler.handler);
+}
+/*----------------------------------------------------------------------------*/
 const char* ts_keyword(void *arg, unsigned index)
 {
   (void) arg;
@@ -54,17 +75,17 @@ const char* ts_keyword(void *arg, unsigned index)
   return NULL;
 }
 /*----------------------------------------------------------------------------*/
-static int _read(void *arg, int argc, char **argv);
+static int cmd_read(void *arg, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 int ts_exec(void *arg, int argc, char **argv)
 {
   if(!strcmp(argv[0], "read")) {
-    return _read(arg, argc, argv);
+    return cmd_read(arg, argc, argv);
   }
   return SHELL_ERR_COMMAND_NOT_FOUND;
 }
 /*----------------------------------------------------------------------------*/
-static int _read(void *arg, int argc, char **argv)
+static int cmd_read(void *arg, int argc, char **argv)
 {
   TEST_SHELL_DATA *data;
 
@@ -72,5 +93,21 @@ static int _read(void *arg, int argc, char **argv)
   (void) argc;
   (void) argv;
   return SHELL_OK;
+}
+/*----------------------------------------------------------------------------*/
+static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
+{
+}
+/*----------------------------------------------------------------------------*/
+static int _close(void *data, int f)
+{
+}
+/*----------------------------------------------------------------------------*/
+static int _read(void *data, int f, void* buf, unsigned size)
+{
+}
+/*----------------------------------------------------------------------------*/
+static int _write(void *data, int f, const void* buf, unsigned size)
+{
 }
 /*----------------------------------------------------------------------------*/

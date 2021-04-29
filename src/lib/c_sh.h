@@ -37,6 +37,28 @@ typedef int (*SHELL_PRINT_CB)(void *arg, int c);
 typedef int (*SHELL_EXEC_CB)(void *arg, int argc, char **argv);
 typedef int (*SHELL_STEP_CB)(void *arg, int argc, char **argv);
 
+typedef enum {
+  SHELL_STDIN = 0,
+  SHELL_STDOUT = 1,
+  SHELL_STDERR = 2,
+} SHELL_STREAM_ID;
+
+typedef enum {
+  SHELL_IN = 0,
+  SHELL_OUT = 1,
+  SHELL_APPEND = 2,
+  SHELL_FIFO = 3
+} SHELL_STREAM_MODE;
+
+
+typedef struct SHELL_STREAM_HANDLER {
+  void *data;
+  int (*_open)(void *data, const char* name, SHELL_STREAM_MODE mode);
+  int (*_close)(void *data, int f);
+  int (*_read)(void *data, int f, void* buf, unsigned size);
+  int (*_write)(void *data, int f, const void* buf, unsigned size);
+} SHELL_STREAM_HANDLER;
+
 #ifdef __cplusplus
 extern "C" {
 #endif /*__cplusplus*/
@@ -52,8 +74,26 @@ void shell_set_print_cb(C_SHELL *sh, SHELL_PRINT_CB cb, void *cb_arg);
 void shell_set_exec_cb(C_SHELL *sh, SHELL_EXEC_CB cb, void *cb_arg);
 /**Set step callback - callback to execute - useful action*/
 void shell_set_step_cb(C_SHELL *sh, SHELL_STEP_CB cb, void *cb_arg);
+/**Set handler for streams*/
+void shell_set_stream_handler(C_SHELL *sh, SHELL_STREAM_HANDLER *h);
+
 /**Get error string by return code*/
 const char *shell_err_string(C_SHELL *sh, int err);
+
+/**Print char*/
+int shell_fputc(C_SHELL *sh, SHELL_STREAM_ID f, int c);
+/**Print string*/
+int shell_fputs(C_SHELL *sh, SHELL_STREAM_ID f, const char *text);
+/**printf style print*/
+int shell_fprintf(C_SHELL *sh, SHELL_STREAM_ID f, const char *format, ...);
+/**printf style print*/
+int shell_vfprintf(C_SHELL *sh, SHELL_STREAM_ID f, const char *format, va_list ap);
+/**Write data to shell stream*/
+int shell_write(C_SHELL *sh, SHELL_STREAM_ID f,  const void *data, unsigned size);
+/**Read data from shell stdin*/
+int shell_read(C_SHELL *sh, void *data, unsigned size);
+
+
 /**Print char*/
 int shell_putc(C_SHELL *sh, int c);
 /**Print string*/
@@ -62,6 +102,7 @@ int shell_puts(C_SHELL *sh, const char *text);
 int shell_printf(C_SHELL *sh, const char *format, ...);
 /**printf style print*/
 int shell_vprintf(C_SHELL *sh, const char *format, va_list ap);
+
 /**Set shell variable*/
 int shell_set_var(C_SHELL *sh, const char *name, const char *value);
 /**Set shell variable*/

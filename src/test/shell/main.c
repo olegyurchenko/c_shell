@@ -85,6 +85,7 @@ int step_cb(void *arg, int argc, char **argv)
   (void) argv;
 
   ts = (TEST_SHELL_DATA *) arg;
+  (void) ts;
 
   if(console_kbhit()) {
     c = console_getchar();
@@ -145,13 +146,10 @@ static int exec_files(void *arg, int argc, char **argv)
 
 int shell_exec(void *arg, int argc, char **argv)
 {
-  unsigned size;
   int found = 0;
 
 
   if(argc >= 1) {
-    size = strlen(argv[0]);
-
     if(!strcmp(argv[0], "exit") || !strcmp(argv[0], "quit")) {
       terminated = 1;
       found = 1;
@@ -184,6 +182,8 @@ int main(int argc, char ** argv)
   shell_set_print_cb(data.sh, print_cb, data.tty);
   shell_set_exec_cb(data.sh, shell_exec, &data);
   shell_set_step_cb(data.sh, step_cb, &data);
+
+  ts_init(&data);
 
   if(argc > 1) {
     return exec_files(&data, argc, argv);

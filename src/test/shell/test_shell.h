@@ -27,6 +27,7 @@ typedef struct  {
 extern "C" {
 #endif /*__cplusplus*/
 
+void ts_init(TEST_SHELL_DATA *);
 const char* ts_keyword(void *arg, unsigned index);
 int ts_exec(void *arg, int argc, char **argv);
 
