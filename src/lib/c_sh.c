@@ -468,6 +468,24 @@ static int shell_writer(void *arg, const char *txt, int size)
   return ret;
 }
 /*----------------------------------------------------------------------------*/
+int shell_isaprint(C_SHELL *sh, SHELL_STREAM_ID f)
+{
+  switch (f) {
+    case SHELL_STDOUT:
+    case SHELL_STDERR:
+      if(sh->stream.ext_handler != NULL
+         && sh->stream.f[f] > 0) {
+        return 0;
+      }
+      return sh->print_cb.cb != NULL;
+      break;
+    default:
+      break;
+  }
+
+  return 0;
+}
+/*----------------------------------------------------------------------------*/
 int shell_fputc(C_SHELL *sh, SHELL_STREAM_ID f, int c)
 {
   SHELL_WRITER_ARG arg;

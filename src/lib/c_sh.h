@@ -118,6 +118,8 @@ int shell_stack_size(C_SHELL *sh);
 int shell_rx(C_SHELL *sh, const char *str);
 /**Terminate shell execution*/
 void shell_terminate(C_SHELL *sh);
+/**return 1 if stream is a SHELL_PRINT_CB*/
+int shell_isaprint(C_SHELL *sh, SHELL_STREAM_ID stream_id);
 
 
 #ifdef __cplusplus
