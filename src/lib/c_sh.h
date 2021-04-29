@@ -25,6 +25,7 @@
 #define SHELL_ERR_NOT_IMPLEMENT (-4) //Command not implemented
 #define SHELL_ERR_INVALID_OP (-5) //Invalid operation
 #define SHELL_STACK_ERROR (-6) //Stack error
+#define SHELL_ERROR_OPEN_FILE (-7) //Error open file
 #define SHELL_EXIT (-100000)
 
 #define SHELL_DEBUG_VAR_NAME "__DEBUG__"

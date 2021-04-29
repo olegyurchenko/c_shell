@@ -352,6 +352,9 @@ const char *shell_err_string(C_SHELL *sh, int err)
     case SHELL_STACK_ERROR:
       str = "Stack error";
       break;
+    case SHELL_ERROR_OPEN_FILE:
+      str = "Error open file";
+      break;
 
   }
   return str;
@@ -443,11 +446,15 @@ static int shell_writer(void *arg, const char *txt, int size)
      && data->sh != NULL) {
 
     if(data->sh->stream.ext_handler != NULL
-       && data->sh->stream.f[data->f]) {
+       && data->sh->stream.f[data->f] > 0) {
       r = data->sh->stream.ext_handler->_write(data->sh->stream.ext_handler->data,
           data->sh->stream.f[data->f],
           txt,
           size);
+      if(r <= 0) {
+        return r;
+      }
+      ret += r;
     } else {
       if(data->sh->print_cb.cb != NULL) {
         for(i = 0; i < size; i++) {
@@ -512,7 +519,7 @@ int shell_read(C_SHELL *sh, void *data, unsigned size)
 {
   int r = 0;
   if(sh->stream.ext_handler != NULL
-     && sh->stream.f[SHELL_STDIN]) {
+     && sh->stream.f[SHELL_STDIN] > 0) {
     r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN], data, size);
   }
   return r;
