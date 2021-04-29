@@ -94,13 +94,13 @@ int shell_write(C_SHELL *sh, SHELL_STREAM_ID f,  const void *data, unsigned size
 int shell_read(C_SHELL *sh, void *data, unsigned size);
 
 
-/**Print char*/
+/**Print char to STDOUT*/
 int shell_putc(C_SHELL *sh, int c);
-/**Print string*/
+/**Print string to STDOUT*/
 int shell_puts(C_SHELL *sh, const char *text);
-/**printf style print*/
+/**printf style print to STDOUT*/
 int shell_printf(C_SHELL *sh, const char *format, ...);
-/**printf style print*/
+/**printf style print to STDOUT*/
 int shell_vprintf(C_SHELL *sh, const char *format, va_list ap);
 
 /**Set shell variable*/
