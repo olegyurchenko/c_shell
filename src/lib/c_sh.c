@@ -1159,9 +1159,73 @@ static int get_condition(C_SHELL *sh)
 }
 /*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/
+/*
+  cmd1 | cmd2 | cmd 3 | cmd4
+  OUT    INOUT  INOUT    IN
+*/
 static int exec0(C_SHELL *sh, int argc, char **argv)
 {
-  return exec1(sh, argc, argv);
+  int i, i0 = 0, arg0, r = SHELL_OK, f = 0;
+
+  arg0 = sh->parser->arg0;
+
+  for(i = 0; i < argc; i++) {
+    if(sh->parser->lex[arg0 + i].type == LEX_VERBAR) {
+      if(sh->stream.ext_handler != NULL) {
+        if(i0) {
+          sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+          sh->stream.f[SHELL_STDIN] = sh->stream.f[SHELL_STDOUT];
+          sh->stream.f[SHELL_STDOUT] = 0;
+        }
+        f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, "", SHELL_FIFO);
+        if(f < 0) {
+          r = f;
+          break;
+        }
+        sh->stream.f[SHELL_STDOUT] = f;
+      }
+
+      if(i > i0) {
+        sh->parser->arg0 = arg0 + i0;
+        r = exec1(sh, i - i0, &argv[i0]);
+        if(r < 0) {
+          break;
+        }
+      }
+      i0 = i + 1;
+    }
+  }
+
+  if(SHELL_OK == r && i > i0) {
+    if(sh->stream.ext_handler != NULL) {
+      if(i0) {
+        sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+        sh->stream.f[SHELL_STDIN] = sh->stream.f[SHELL_STDOUT];
+      }
+      sh->stream.f[SHELL_STDOUT] = 0;
+    }
+
+    sh->parser->arg0 = arg0 + i0;
+    r = exec1(sh, i - i0, &argv[i0]);
+  }
+
+
+  if(sh->stream.ext_handler != NULL) {
+    if(sh->stream.f[SHELL_STDIN] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+    }
+    if(sh->stream.f[SHELL_STDOUT] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDOUT]);
+    }
+    if(sh->stream.f[SHELL_STDERR] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDERR]);
+    }
+  }
+  sh->stream.f[SHELL_STDIN] = 0;
+  sh->stream.f[SHELL_STDOUT] = 0;
+  sh->stream.f[SHELL_STDERR] = 0;
+
+  return r;
 }
 /*----------------------------------------------------------------------------*/
 static int exec1(C_SHELL *sh, int argc, char **argv)

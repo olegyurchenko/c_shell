@@ -88,26 +88,44 @@ int ts_exec(void *arg, int argc, char **argv)
 static int cmd_read(void *arg, int argc, char **argv)
 {
   TEST_SHELL_DATA *data;
+  int r = SHELL_OK, c;
 
   data = (TEST_SHELL_DATA *) arg;
   (void) argc;
   (void) argv;
-  return SHELL_OK;
+
+  while(1) {
+    c  = 0;
+    r = shell_read(data->sh, &c, 1);
+    if(r <= 0) {
+      break;
+    }
+    r = shell_putc(data->sh, c);
+    if(r <= 0) {
+      break;
+    }
+  }
+
+  return r;
 }
 /*----------------------------------------------------------------------------*/
 static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
 {
+  return 1;
 }
 /*----------------------------------------------------------------------------*/
 static int _close(void *data, int f)
 {
+  return 0;
 }
 /*----------------------------------------------------------------------------*/
 static int _read(void *data, int f, void* buf, unsigned size)
 {
+  return 0;
 }
 /*----------------------------------------------------------------------------*/
 static int _write(void *data, int f, const void* buf, unsigned size)
 {
+  return 0;
 }
 /*----------------------------------------------------------------------------*/
