@@ -66,7 +66,7 @@ int enter_cb(void *arg, const char *text, unsigned size)
   r = shell_rx(ts->sh, text);
   if(r < 0) {
     if( r != CTRL_C_EXIT)
-      shell_printf(ts->sh, ">> %s <<\n", shell_err_string(ts->sh, r));
+      shell_fprintf(ts->sh, SHELL_STDERR, ">> %s <<\n", shell_err_string(ts->sh, r));
 
     if(shell_stack_size(ts->sh)
        || r == SHELL_ERR_MALLOC)
@@ -100,7 +100,7 @@ int ctrl_c_cb(void *arg, const char *text, unsigned size)
   (void) text;
   ts = (TTY_SHELL *)arg;
   if(!size) {
-    shell_printf(ts->sh, "<reset>\n");
+    shell_fprintf(ts->sh, SHELL_STDERR, "<reset>\n");
     shell_reset(ts->sh);
   }
   return 0;
@@ -143,7 +143,7 @@ static int exec_files(C_SHELL *sh, int argc, char **argv)
     f = fopen(argv[i], "r");
     if(f == NULL)
     {
-      shell_printf(sh, "Error open file '%s'\n", argv[i]);
+      shell_fprintf(sh, SHELL_STDERR, "Error open file '%s'\n", argv[i]);
       return SHELL_ERR_INVALID_ARG;
     }
 
@@ -155,11 +155,11 @@ static int exec_files(C_SHELL *sh, int argc, char **argv)
         break;
       }
       if(SHELL_OK == shell_get_int_var(sh, SHELL_DEBUG_VAR_NAME, &debug) && debug) {
-        shell_printf(sh, "%s:%d:%s\n", argv[i], line, buffer);
+        shell_fprintf(sh, SHELL_STDERR, "%s:%d:%s\n", argv[i], line, buffer);
       }
       ret = shell_rx(sh, buffer);
       if(ret < 0) {
-        shell_printf(sh, "%s:%d:%s\n", argv[i], line, shell_err_string(sh, ret));
+        shell_fprintf(sh, SHELL_STDERR, "%s:%d:%s\n", argv[i], line, shell_err_string(sh, ret));
         break;
       }
     }

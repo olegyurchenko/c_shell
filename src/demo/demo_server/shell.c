@@ -175,7 +175,7 @@ static int ctrl_c_cb(void *arg, const char *text, unsigned size)
 
 
   if(!size) {
-    shell_printf(data->sh, "<reset>\n");
+    shell_fprintf(data->sh, SHELL_STDERR, "<reset>\n");
     shell_reset(data->sh);
   }
   return 0;
@@ -219,7 +219,7 @@ static int enter_cb(void *arg, const char *text, unsigned size)
 
   r = shell_rx(data->sh, text);
   if(r < 0) {
-      shell_printf(data->sh, ">> %s <<\n", shell_err_string(data->sh, r));
+      shell_fprintf(data->sh, SHELL_STDERR, ">> %s <<\n", shell_err_string(data->sh, r));
 
     if(shell_stack_size(data->sh)
        || r == SHELL_ERR_MALLOC)
@@ -293,7 +293,7 @@ static int help_cb(SHELL_DATA *sh, int argc, char **argv)
     }
 
     if(i >= sizeof(shell_functions)/sizeof(shell_functions[0])) {
-      shell_printf(sh->sh, "Command '%s' not found\n", cmd);
+      shell_fprintf(sh->sh, SHELL_STDERR, "Command '%s' not found\n", cmd);
     } else {
       shell_printf(sh->sh, "%s - %s\n", shell_functions[i]->name, shell_functions[i]->description);
       shell_printf(sh->sh, "%s\n", shell_functions[i]->help);
@@ -445,7 +445,7 @@ static int rm_pass(SHELL_DATA *sh, const char *user)
   }
 
   if(i >= user_count) {
-    shell_printf(sh->sh, "User %s not found\n", user);
+    shell_fprintf(sh->sh, SHELL_STDERR, "User %s not found\n", user);
     return 1;
   }
 
@@ -472,7 +472,7 @@ static int passwd_cb(SHELL_DATA *sh, int argc, char **argv)
 
   if(argc > 1) {
     if(!*user || strlen(argv[1]) > MAX_USER_LENGTH) {
-      shell_printf(sh->sh, "Name length out of range\n");
+      shell_fprintf(sh->sh, SHELL_STDERR, "Name length out of range\n");
       return 1;
     }
   }
@@ -497,7 +497,7 @@ static int passwd_cb(SHELL_DATA *sh, int argc, char **argv)
   }
 
   if(i >= user_count) {
-    shell_printf(sh->sh, "User %s not found\n", user);
+    shell_fprintf(sh->sh, SHELL_STDERR, "User %s not found\n", user);
     FREE(data);
     return 1;
   }
@@ -527,12 +527,12 @@ static int user_add(SHELL_DATA *sh, const char *user)
   size = strlen(user);
 
   if(!size || size >= MAX_USER_LENGTH) {
-    shell_printf(sh->sh, "Name length out of range\n");
+    shell_fprintf(sh->sh, SHELL_STDERR, "Name length out of range\n");
     return 1;
   }
 
   if(user_count >= MAX_USER_COUNT - 1) {
-    shell_printf(sh->sh, "The number of users has exceeded the limit\n");
+    shell_fprintf(sh->sh, SHELL_STDERR, "The number of users has exceeded the limit\n");
     return 1;
   }
 
@@ -544,7 +544,7 @@ static int user_add(SHELL_DATA *sh, const char *user)
   }
 
   if(i < user_count) {
-    shell_printf(sh->sh, "User %s already exist\n", user);
+    shell_fprintf(sh->sh, SHELL_STDERR, "User %s already exist\n", user);
     return 1;
   }
 
@@ -560,7 +560,7 @@ static int useradd_cb(SHELL_DATA *sh, int argc, char **argv)
 {
   int result = 0, i;
   if(argc < 2) {
-    shell_printf(sh->sh, "Invalid arg\n");
+    shell_fprintf(sh->sh, SHELL_STDERR, "Invalid arg\n");
     return 1;
   }
   for(i = 1; i < argc; i++) {
@@ -582,7 +582,7 @@ static int user_del(SHELL_DATA *sh, const char *user)
   }
 
   if(i >= user_count) {
-    shell_printf(sh->sh, "User %s not found\n", user);
+    shell_fprintf(sh->sh, SHELL_STDERR, "User %s not found\n", user);
     return 1;
   }
 
@@ -597,7 +597,7 @@ static int userdel_cb(SHELL_DATA *sh, int argc, char **argv)
 {
   int result = 0, i;
   if(argc < 2) {
-    shell_printf(sh->sh, "Invalid arg\n");
+    shell_fprintf(sh->sh, SHELL_STDERR, "Invalid arg\n");
     return 1;
   }
 
@@ -629,7 +629,7 @@ int shell_init(SHELL_DATA *data)
     set_login_mode(data);
   } else {
     set_shell_mode(data);
-    shell_printf(data->sh,
+    shell_fprintf(data->sh, SHELL_STDERR,
                  "User accounts are not programmed\n"
                  "Use 'useradd' & 'passwd' for create accounts\n"
                  );

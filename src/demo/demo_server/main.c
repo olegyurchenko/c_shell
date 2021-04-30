@@ -188,7 +188,7 @@ static int step_cb(void *arg, int argc, char **argv)
 
   data->watchdog ++;
   if(data->watchdog > 1000) {
-    shell_printf(data->sh, "Wachdog triggered\n");
+    shell_fprintf(data->sh, SHELL_STDERR, "Wachdog triggered\n");
     fprintf(stderr, "Wachdog triggered\n");
     r = SHELL_STACK_ERROR;
   }

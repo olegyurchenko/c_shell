@@ -64,7 +64,7 @@ static int exec_file(int argc, char **argv)
         break;
       }
       if(SHELL_OK == shell_get_int_var(sh, SHELL_DEBUG_VAR_NAME, &debug) && debug) {
-        shell_printf(sh, "%s:%d:%s\n", argv[i], line, buffer);
+        shell_fprintf(sh, SHELL_STDERR, "%s:%d:%s\n", argv[i], line, buffer);
       }
       ret = shell_rx(sh, buffer);
       if(ret < 0) {
