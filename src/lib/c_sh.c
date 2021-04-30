@@ -713,7 +713,7 @@ static void clear_vars(C_SHELL *sh)
 int shell_set_var(C_SHELL *sh, const char *name, const char *value)
 {
   if(is_debug_mode(sh)) {
-    shell_printf(sh, "set '%s' = '%s'\n", name, (value == NULL || !*value) ? "NULL" : value);
+    shell_fprintf(sh, SHELL_STDERR, "set '%s' = '%s'\n", name, (value == NULL || !*value) ? "NULL" : value);
   }
 
   return set_var(sh, name, value);
@@ -1438,18 +1438,18 @@ static int exec3(C_SHELL *sh, int argc, char **argv)
   }
 
   if(is_debug_mode(sh)) {
-    shell_printf(sh, "[%c] [s:%d] [c:%d] [id:%d]", is_true_condition(sh) ? 'x' : ' ', context_stack(sh), sh->cache_stack, sh->op_id);
+    shell_fprintf(sh, SHELL_STDERR, "[%c] [s:%d] [c:%d] [id:%d]", is_true_condition(sh) ? 'x' : ' ', context_stack(sh), sh->cache_stack, sh->op_id);
     for(i = 0; i < argc; i++) {
-      shell_printf(sh, " %s", argv[i]);
+      shell_fprintf(sh, SHELL_STDERR, " %s", argv[i]);
     }
 
     if(is_cache_debug_mode(sh)) {
       unsigned allocated = 0, free = 0, count = 0;
       cache_stat(sh->cache, &allocated, &free, &count);
-      shell_printf(sh, " cache:a:%u:f:%u:c:%u\n", allocated, free, count);
+      shell_fprintf(sh, SHELL_STDERR, " cache:a:%u:f:%u:c:%u\n", allocated, free, count);
     }
     else {
-      shell_putc(sh, '\n');
+      shell_fputc(sh, SHELL_STDERR, '\n');
     }
 
   }
@@ -2020,16 +2020,16 @@ static void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size)
 {
   int i;
   const char *p;
-  shell_printf(sh, "LEX:argc:%d {\n", size);
+  shell_fprintf(sh, SHELL_STDERR, "LEX:argc:%d {\n", size);
   for(i = 0; i < size; i++) {
-    shell_printf(sh, "%16s%8s`", lex_name(args[i].type), "");
+    shell_fprintf(sh, SHELL_STDERR, "%16s%8s`", lex_name(args[i].type), "");
     for(p = args[i].start; p < args[i].end; p++) {
-      shell_putc(sh, *p);
+      shell_fputc(sh, SHELL_STDERR, *p);
     }
-    shell_putc(sh, '\'');
-    shell_putc(sh, '\n');
+    shell_fputc(sh, SHELL_STDERR, '\'');
+    shell_fputc(sh, SHELL_STDERR, '\n');
   }
-  shell_printf(sh, "%10s\n", "}");
+  shell_fprintf(sh, SHELL_STDERR, "%10s\n", "}");
 }
 /*----------------------------------------------------------------------------*/
 static char htoc(const char **src)
@@ -2269,11 +2269,11 @@ static int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv
 static void args_print(C_SHELL *sh, int argc, char **argv)
 {
   int i;
-  shell_printf(sh, "PARSER:argc:%d\n", argc);
+  shell_fprintf(sh, SHELL_STDERR, "PARSER:argc:%d\n", argc);
   for(i = 0; i < argc; i++) {
-    shell_printf(sh, "args[%d]:'%s'\n", i, argv[i]);
+    shell_fprintf(sh, SHELL_STDERR, "args[%d]:'%s'\n", i, argv[i]);
   }
-  shell_printf(sh, "%10s\n", "}");
+  shell_fprintf(sh, SHELL_STDERR, "%10s\n", "}");
 }
 /*----------------------------------------------------------------------------*/
 static int context_stack(C_SHELL *sh)
@@ -2354,7 +2354,7 @@ static int add_src_to_cache(C_SHELL *sh, const char *src, unsigned size)
     c = c->child;
   }
   if(is_debug_mode(sh) && lc != NULL) {
-    shell_printf(sh, "Cashed:*:s:%d:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
+    shell_fprintf(sh, SHELL_STDERR, "Cashed:*:s:%d:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
   }
 
   return 0;
@@ -2385,7 +2385,7 @@ static void add_cache_to_cache(C_SHELL *sh, C_SHELL_CONTEXT *parent, C_SHELL_LIN
   }
 
   if(is_debug_mode(sh) && add) {
-    shell_printf(sh, "Cashed:s:%d:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
+    shell_fprintf(sh, SHELL_STDERR, "Cashed:s:%d:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
   }
 }
 /*----------------------------------------------------------------------------*/
@@ -2445,7 +2445,7 @@ static int remove_cache(C_SHELL *sh)
     while (lc != NULL) {
       next = lc->next;
       if(is_debug_mode(sh)) {
-        shell_printf(sh, "Rm cache[%d]:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
+        shell_fprintf(sh, SHELL_STDERR, "Rm cache[%d]:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
       }
       cache_free(sh->cache, lc);
       lc = next;
@@ -2498,7 +2498,7 @@ static int error_msg(TEST_DATA *data, const char *fmt, ...)
   va_start(ap, fmt);
   r = shell_vprintf(data->sh, fmt, ap);
   va_end(ap);
-  r += shell_putc(data->sh, '\n');
+  r += shell_fputc(data->sh, SHELL_STDERR, '\n');
   return r;
 }
 /*----------------------------------------------------------------------------*/
@@ -2516,13 +2516,13 @@ static void debug_msg(TEST_DATA *data, const char *op)
   int i;
   if(!is_debug_mode(data->sh))
     return;
-  shell_printf(data->sh, "<<op:%s:", op == NULL ? "" : op);
-  shell_printf(data->sh, "arg0:%d:argc:%d", data->arg0, data->argc);
+  shell_fprintf(data->sh, SHELL_STDERR, "<<op:%s:", op == NULL ? "" : op);
+  shell_fprintf(data->sh, SHELL_STDERR, "arg0:%d:argc:%d", data->arg0, data->argc);
 
   for(i = data->arg0; i < data->argc; i++) {
-    shell_printf(data->sh, ":%s", data->argv[i]);
+    shell_fprintf(data->sh, SHELL_STDERR, ":%s", data->argv[i]);
   }
-  shell_printf(data->sh, ">>\n");
+  shell_fprintf(data->sh, SHELL_STDERR, ">>\n");
 }
 /*----------------------------------------------------------------------------*/
 /* test(1) accepts the following grammar:
