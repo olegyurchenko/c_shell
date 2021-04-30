@@ -139,6 +139,8 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
     return SHELL_ERR_MALLOC;
   }
 
+  handler->streams[i].fd[0] = 0;
+  handler->streams[i].fd[1] = 0;
   switch (mode) {
     case SHELL_IN:
       h = open(name, O_RDONLY);
@@ -166,7 +168,7 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
       lseek(h, 0, SEEK_SET);
       break;
     case SHELL_FIFO:
-      if((h = pipe2(handler->streams[i].fd, O_NONBLOCK)) < 0) {
+      if((h = pipe(handler->streams[i].fd)) < 0) {
         r = SHELL_ERROR_OPEN_FILE;
       }
       break;
@@ -196,18 +198,13 @@ static int _close(void *data, int f)
     return SHELL_ERR_INVALID_ARG;
   }
   i = f - 1;
-  switch (handler->streams[i].mode) {
-    case SHELL_IN:
-      close(handler->streams[i].fd[0]);
-      break;
-    case SHELL_OUT:
-    case SHELL_APPEND:
-      close(handler->streams[i].fd[1]);
-      break;
-    case SHELL_FIFO:
-      close(handler->streams[i].fd[0]);
-      close(handler->streams[i].fd[1]);
-      break;
+  if(handler->streams[i].fd[0]) {
+    close(handler->streams[i].fd[0]);
+    handler->streams[i].fd[0] = 0;
+  }
+  if(handler->streams[i].fd[1]) {
+    close(handler->streams[i].fd[1]);
+    handler->streams[i].fd[1] = 0;
   }
   handler->streams[i].mode = -1;
   return SHELL_OK;
@@ -223,14 +220,15 @@ static int _read(void *data, int f, void* buf, unsigned size)
     return SHELL_ERR_INVALID_ARG;
   }
   i = f - 1;
-  switch (handler->streams[i].mode) {
-    case SHELL_IN:
-    case SHELL_FIFO:
-      r = read(handler->streams[i].fd[0], buf, size);
-      break;
-    case SHELL_OUT:
-    case SHELL_APPEND:
-      break;
+
+  if(handler->streams[i].fd[1]) {
+    //Close unused write end
+    close(handler->streams[i].fd[1]);
+    handler->streams[i].fd[1] = 0;
+  }
+
+  if(handler->streams[i].fd[0]) {
+    r = read(handler->streams[i].fd[0], buf, size);
   }
   return r;
 }
@@ -245,14 +243,8 @@ static int _write(void *data, int f, const void* buf, unsigned size)
     return SHELL_ERR_INVALID_ARG;
   }
   i = f - 1;
-  switch (handler->streams[i].mode) {
-    case SHELL_IN:
-      break;
-    case SHELL_OUT:
-    case SHELL_APPEND:
-    case SHELL_FIFO:
-      r = write(handler->streams[i].fd[1], buf, size);
-      break;
+  if(handler->streams[i].fd[0]) {
+    r = write(handler->streams[i].fd[1], buf, size);
   }
   return r;
 }
