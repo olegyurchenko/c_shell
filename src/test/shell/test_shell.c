@@ -104,11 +104,14 @@ int ts_exec(void *arg, int argc, char **argv)
 static int cmd_read(void *arg, int argc, char **argv)
 {
   TEST_SHELL_DATA *data;
-  int r = SHELL_OK, c;
+  int i, r = SHELL_OK, c;
 
   data = (TEST_SHELL_DATA *) arg;
-  (void) argc;
-  (void) argv;
+
+  //To check stderr
+  for(i = 1; i < argc; i++) {
+    shell_fprintf(data->sh, SHELL_STDERR, "Invalid option '%s'\n", argv[i]);
+  }
 
   while(1) {
     c  = 0;
@@ -157,7 +160,7 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
       handler->streams[i].fd[0] = h;
       break;
     case SHELL_OUT:
-      h = open(name, O_WRONLY | O_CREAT, 0666);
+      h = open(name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
       if(h < 0) {
         r = SHELL_ERROR_OPEN_FILE;
         break;
@@ -166,14 +169,15 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
       handler->streams[i].fd[1] = h;
       break;
     case SHELL_APPEND:
-      h = open(name, O_RDWR | O_CREAT, 0666);
+      h = open(name, O_WRONLY | O_CREAT, 0666);
       if(h < 0) {
         r = SHELL_ERROR_OPEN_FILE;
         break;
       }
       //Write end
       handler->streams[i].fd[1] = h;
-      lseek(h, 0, SEEK_SET);
+      //Seek to end
+      lseek(h, 0, SEEK_END);
       break;
     case SHELL_FIFO:
       //Read / write end
@@ -229,6 +233,7 @@ static int _read(void *data, int f, void* buf, unsigned size)
   }
   i = f - 1;
 
+
   if(handler->streams[i].fd[1]) {
     //Close unused write end
     close(handler->streams[i].fd[1]);
@@ -251,7 +256,7 @@ static int _write(void *data, int f, const void* buf, unsigned size)
     return SHELL_ERR_INVALID_ARG;
   }
   i = f - 1;
-  if(handler->streams[i].fd[0]) {
+  if(handler->streams[i].fd[1]) {
     r = write(handler->streams[i].fd[1], buf, size);
   }
   return r;

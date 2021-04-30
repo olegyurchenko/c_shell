@@ -1253,8 +1253,171 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
   return r;
 }
 /*----------------------------------------------------------------------------*/
+/*Handle STDIN/STDOUT/STDERR redirect
+ cmd < IN
+ cmd < IN 1> OUT 2> ERR
+ cmd  1>> OUT 2>> ERR < IN
+ cmd  2> &1
+*/
 static int exec1(C_SHELL *sh, int argc, char **argv)
 {
+  int i, i0, redirect, f;
+  int argc_new;
+  SHELL_STREAM_MODE mode;
+  SHELL_STREAM_ID stream1, stream2;
+  const char *filename;
+
+  argc_new = argc;
+
+  //Hanlde > file and < file
+  for(i = 0; i < argc - 1; i++) {
+    redirect = 0;
+    // > file
+    if(sh->parser->lex[sh->parser->arg0 + i].type == LEX_GT
+       && sh->parser->lex[sh->parser->arg0 + i + 1].type == LEX_STR
+       ) {
+      mode = SHELL_OUT;
+      stream1 = SHELL_STDOUT;
+      i0 = i;
+      filename = argv[i + 1];
+
+      if(i0 && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_GT) { //>>
+        mode = SHELL_APPEND;
+        i0 --;
+      }
+
+      //1>
+      if(i0
+         && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i0].end
+          - sh->parser->lex[sh->parser->arg0 + i0 - 1].start == 2) {
+          switch(*sh->parser->lex[sh->parser->arg0 + i0 - 1].start) {
+            case '1':
+              i0 --;
+              stream1 = SHELL_STDOUT;
+              break;
+            case '2':
+              i0 --;
+              stream1 = SHELL_STDERR;
+              break;
+          }
+        }
+
+      if(argc_new > i0) {
+        argc_new = i0;
+      }
+      redirect = 1;
+    } //> file
+
+    // < file
+    if(sh->parser->lex[sh->parser->arg0 + i].type == LEX_LT
+       && sh->parser->lex[sh->parser->arg0 + i + 1].type == LEX_STR
+       ) {
+      mode = SHELL_IN;
+      stream1 = SHELL_STDIN;
+      i0 = i;
+      filename = argv[i + 1];
+
+      // 0<
+      if(i0
+         && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i0].end
+          - sh->parser->lex[sh->parser->arg0 + i0 - 1].start == 2) {
+        switch(*sh->parser->lex[sh->parser->arg0 + i0 - 1].start) {
+          case '0':
+            i0 --;
+            break;
+        }
+      }
+
+      if(argc_new > i0) {
+        argc_new = i0;
+      }
+      redirect = 1;
+    } // < file
+
+
+    if(redirect
+      && sh->stream.ext_handler != NULL) {
+
+      if(sh->stream.f[stream1] > 0) {
+        sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[stream1]);
+        sh->stream.f[stream1] = 0;
+      }
+      f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, filename, mode);
+      if(f < 0) {
+        return f;
+      }
+      sh->stream.f[stream1] = f;
+    }
+  }
+
+  //Hanlde >&
+  for(i = 0; i < argc - 1; i++) {
+    // >&
+    if(sh->parser->lex[sh->parser->arg0 + i].type == LEX_GT
+       && sh->parser->lex[sh->parser->arg0 + i + 1].type == LEX_AMP
+       ) {
+      stream1 = stream2 = SHELL_STDOUT;
+      i0 = i;
+
+      if(i0 && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_GT) { //>>
+        i0 --;
+      }
+
+      //1>
+      if(i0
+         && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i0].end
+          - sh->parser->lex[sh->parser->arg0 + i0 - 1].start == 2) {
+          switch(*sh->parser->lex[sh->parser->arg0 + i0 - 1].start) {
+            case '1':
+              i0 --;
+              stream1 = SHELL_STDOUT;
+              break;
+            case '2':
+              i0 --;
+              stream1 = SHELL_STDERR;
+              break;
+          }
+        } //1>
+
+      //&1
+      if(i < argc - 2
+         && sh->parser->lex[sh->parser->arg0 + i + 2].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i + 2].end
+          - sh->parser->lex[sh->parser->arg0 + i + 1].start == 2
+         ) {
+
+        switch(*sh->parser->lex[sh->parser->arg0 + i + 2].start) {
+          case '1':
+            stream2 = SHELL_STDOUT;
+            break;
+          case '2':
+            stream2 = SHELL_STDERR;
+            break;
+        }
+      } //&1
+
+
+      if(stream1 != stream2
+         && sh->stream.ext_handler != NULL) {
+
+        if(sh->stream.f[stream1] > 0) {
+          sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[stream1]);
+          sh->stream.f[stream1] = 0;
+        }
+        sh->stream.f[stream1] = sh->stream.f[stream2];
+      }
+
+      if(argc_new > i0) {
+        argc_new = i0;
+      }
+
+    } //>&
+  }
+
+  argc = argc_new;
   return exec3(sh, argc, argv);
 }
 /*----------------------------------------------------------------------------*/
