@@ -53,12 +53,11 @@ typedef struct {
   int fd[2];
 } stream_t;
 /*----------------------------------------------------------------------------*/
-#define MAX_STREAM_COUNT 16
+#define MAX_STREAM_COUNT 4 //For one shell may be opened 3: cmd < STDIN > STDOUT 2> STDERR
 /*----------------------------------------------------------------------------*/
 typedef struct {
   SHELL_STREAM_HANDLER handler;
   stream_t streams[MAX_STREAM_COUNT];
-  int stream_count;
 } stream_handler_t;
 
 static stream_handler_t stream_handler;
@@ -69,6 +68,7 @@ static int _write(void *data, int f, const void* buf, unsigned size);
 /*----------------------------------------------------------------------------*/
 void ts_init(TEST_SHELL_DATA *data)
 {
+  int i;
   memset(&stream_handler, 0, sizeof(stream_handler_t));
   stream_handler.handler.data = &stream_handler;
   stream_handler.handler._open = _open;
@@ -76,6 +76,9 @@ void ts_init(TEST_SHELL_DATA *data)
   stream_handler.handler._read = _read;
   stream_handler.handler._write = _write;
   shell_set_stream_handler(data->sh, &stream_handler.handler);
+  for(i = 0; i < MAX_STREAM_COUNT; i++) {
+    stream_handler.streams[i].mode = -1;
+  }
 }
 /*----------------------------------------------------------------------------*/
 const char* ts_keyword(void *arg, unsigned index)
@@ -129,17 +132,19 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
 
   handler = (stream_handler_t *) data;
 
-  for(i = 0; i < handler->stream_count; i++) {
+  for(i = 0; i < MAX_STREAM_COUNT; i++) {
     if(handler->streams[i].mode == -1) {
       break;
     }
   }
 
-  if(i == handler->stream_count && handler->stream_count >= MAX_STREAM_COUNT) {
+  if(i == MAX_STREAM_COUNT) {
     return SHELL_ERR_MALLOC;
   }
 
+  //Read end
   handler->streams[i].fd[0] = 0;
+  //Write end
   handler->streams[i].fd[1] = 0;
   switch (mode) {
     case SHELL_IN:
@@ -148,6 +153,7 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
         r = SHELL_ERROR_OPEN_FILE;
         break;
       }
+      //Read end
       handler->streams[i].fd[0] = h;
       break;
     case SHELL_OUT:
@@ -156,6 +162,7 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
         r = SHELL_ERROR_OPEN_FILE;
         break;
       }
+      //Write end
       handler->streams[i].fd[1] = h;
       break;
     case SHELL_APPEND:
@@ -164,10 +171,12 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
         r = SHELL_ERROR_OPEN_FILE;
         break;
       }
+      //Write end
       handler->streams[i].fd[1] = h;
       lseek(h, 0, SEEK_SET);
       break;
     case SHELL_FIFO:
+      //Read / write end
       if((h = pipe(handler->streams[i].fd)) < 0) {
         r = SHELL_ERROR_OPEN_FILE;
       }
@@ -179,9 +188,6 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
 
   if(SHELL_OK == r) {
     handler->streams[i].mode = mode;
-    if(i == handler->stream_count) {
-      handler->stream_count ++;
-    }
     r = i + 1;
   }
 
@@ -194,15 +200,17 @@ static int _close(void *data, int f)
   int i;
 
   handler = (stream_handler_t *) data;
-  if(f <= 0 || f > handler->stream_count) {
+  if(f <= 0 || f > MAX_STREAM_COUNT) {
     return SHELL_ERR_INVALID_ARG;
   }
   i = f - 1;
   if(handler->streams[i].fd[0]) {
+    //Close read end
     close(handler->streams[i].fd[0]);
     handler->streams[i].fd[0] = 0;
   }
   if(handler->streams[i].fd[1]) {
+    //Close write end
     close(handler->streams[i].fd[1]);
     handler->streams[i].fd[1] = 0;
   }
@@ -213,10 +221,10 @@ static int _close(void *data, int f)
 static int _read(void *data, int f, void* buf, unsigned size)
 {
   stream_handler_t *handler;
-  int i, r = SHELL_OK;
+  int i, r = 0;
 
   handler = (stream_handler_t *) data;
-  if(f <= 0 || f > handler->stream_count) {
+  if(f <= 0 || f > MAX_STREAM_COUNT) {
     return SHELL_ERR_INVALID_ARG;
   }
   i = f - 1;
@@ -236,10 +244,10 @@ static int _read(void *data, int f, void* buf, unsigned size)
 static int _write(void *data, int f, const void* buf, unsigned size)
 {
   stream_handler_t *handler;
-  int i, r = SHELL_OK;
+  int i, r = 0;
 
   handler = (stream_handler_t *) data;
-  if(f <= 0 || f > handler->stream_count) {
+  if(f <= 0 || f > MAX_STREAM_COUNT) {
     return SHELL_ERR_INVALID_ARG;
   }
   i = f - 1;
