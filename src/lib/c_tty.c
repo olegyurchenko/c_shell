@@ -570,7 +570,10 @@ static int intern_tab_cb(void *arg, const char *text, unsigned size)
   if(size >= 1) {
     i = size - 1;
     while (i) {
-      if(text[i] == ' ' || text[i] == ';') {
+      if(text[i] == ' '
+         || text[i] == ';'
+         || text[i] == '|'
+         ) {
         text = text + i + 1;
         size -= i + 1;
         break;

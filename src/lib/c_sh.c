@@ -164,6 +164,11 @@ struct C_SHELL_TAG {
     void *arg;
   } step_cb;
 
+  struct {
+    SHELL_STREAM_HANDLER *ext_handler;
+    int f[3]; /*File h f[0] - stdin, f[1] - stdout, f[2] - stderr*/
+  } stream;
+
   C_CACHE *cache;
   C_SHELL_CONTEXT context;
   C_SHELL_PARSER *parser;
@@ -214,7 +219,9 @@ static int is_lex_debug_mode(C_SHELL *sh);
 static int is_pars_debug_mode(C_SHELL *sh);
 static int is_cache_debug_mode(C_SHELL *sh);
 /*----------------------------------------------------------------------------*/
-static int _exec(C_SHELL *sh, int argc, char **argv);
+static int exec0(C_SHELL *sh, int argc, char **argv);
+static int exec1(C_SHELL *sh, int argc, char **argv);
+static int exec3(C_SHELL *sh, int argc, char **argv);
 static int embed_exec(C_SHELL *sh, int argc, char **argv);
 /**Embeded functions*/
 static int _eXit(C_SHELL *sh, int argc, char **argv);
@@ -345,6 +352,9 @@ const char *shell_err_string(C_SHELL *sh, int err)
     case SHELL_STACK_ERROR:
       str = "Stack error";
       break;
+    case SHELL_ERROR_OPEN_FILE:
+      str = "Error open file";
+      break;
 
   }
   return str;
@@ -409,37 +419,150 @@ void shell_set_step_cb(C_SHELL *sh, SHELL_STEP_CB cb, void *cb_arg)
   sh->step_cb.arg = cb_arg;
 }
 /*----------------------------------------------------------------------------*/
+void shell_set_stream_handler(C_SHELL *sh, SHELL_STREAM_HANDLER *h)
+{
+  sh->stream.ext_handler = h;
+}
+/*----------------------------------------------------------------------------*/
+typedef struct {
+  C_SHELL *sh;
+  SHELL_STREAM_ID f;
+} SHELL_WRITER_ARG;
 static int shell_writer(void *arg, const char *txt, int size)
 {
-  C_SHELL *sh;
+  SHELL_WRITER_ARG *data;
   int i, r, ret = 0;
-  sh = (C_SHELL *) arg;
-  if(sh != NULL && sh->print_cb.cb != NULL) {
-    for(i = 0; i < size; i++) {
-      if((r = sh->print_cb.cb(sh->print_cb.arg, txt[i])) <= 0)
+  data = (SHELL_WRITER_ARG *) arg;
+
+  switch (data->f) {
+    case SHELL_STDOUT:
+    case SHELL_STDERR:
+      break;
+    default:
+      return SHELL_ERR_INVALID_OP;
+  }
+
+  if(data != NULL
+     && data->sh != NULL) {
+
+    if(data->sh->stream.ext_handler != NULL
+       && data->sh->stream.f[data->f] > 0) {
+      r = data->sh->stream.ext_handler->_write(data->sh->stream.ext_handler->data,
+          data->sh->stream.f[data->f],
+          txt,
+          size);
+      if(r <= 0) {
         return r;
+      }
       ret += r;
+    } else {
+      if(data->sh->print_cb.cb != NULL) {
+        for(i = 0; i < size; i++) {
+          if((r = data->sh->print_cb.cb(data->sh->print_cb.arg, txt[i])) <= 0)
+            return r;
+          ret += r;
+        }
+      }
     }
   }
   return ret;
 }
 /*----------------------------------------------------------------------------*/
+int shell_isaprint(C_SHELL *sh, SHELL_STREAM_ID f)
+{
+  switch (f) {
+    case SHELL_STDOUT:
+    case SHELL_STDERR:
+      if(sh->stream.ext_handler != NULL
+         && sh->stream.f[f] > 0) {
+        return 0;
+      }
+      return sh->print_cb.cb != NULL;
+      break;
+    default:
+      break;
+  }
+
+  return 0;
+}
+/*----------------------------------------------------------------------------*/
+int shell_fputc(C_SHELL *sh, SHELL_STREAM_ID f, int c)
+{
+  SHELL_WRITER_ARG arg;
+  arg.sh = sh;
+  arg.f = f;
+  return shell_writer(&arg, (char *) &c, 1);
+}
+/*----------------------------------------------------------------------------*/
+int shell_fputs(C_SHELL *sh, SHELL_STREAM_ID f, const char *text)
+{
+  SHELL_WRITER_ARG arg;
+  arg.sh = sh;
+  arg.f = f;
+  return shell_writer(&arg, text, (int) strlen(text));
+}
+/*----------------------------------------------------------------------------*/
+int shell_fprintf(C_SHELL *sh, SHELL_STREAM_ID f, const char *format, ...)
+{
+  int r;
+  SHELL_WRITER_ARG arg;
+  va_list ap;
+  arg.sh = sh;
+  arg.f = f;
+
+  va_start(ap, format);
+  r = vnprintf(shell_writer, &arg, format, ap);
+  va_end(ap);
+
+  return r;
+}
+/*----------------------------------------------------------------------------*/
+int shell_vfprintf(C_SHELL *sh, SHELL_STREAM_ID f, const char *format, va_list ap)
+{
+  SHELL_WRITER_ARG arg;
+  arg.sh = sh;
+  arg.f = f;
+  return vnprintf(shell_writer, &arg, format, ap);
+}
+/*----------------------------------------------------------------------------*/
+int shell_write(C_SHELL *sh, SHELL_STREAM_ID f,  const void *data, unsigned size)
+{
+  SHELL_WRITER_ARG arg;
+  arg.sh = sh;
+  arg.f = f;
+  return shell_writer(&arg, (const char *)data, size);
+}
+/*----------------------------------------------------------------------------*/
+int shell_read(C_SHELL *sh, void *data, unsigned size)
+{
+  int r = 0;
+  if(sh->stream.ext_handler != NULL
+     && sh->stream.f[SHELL_STDIN] > 0) {
+    r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN], data, size);
+  }
+  return r;
+}
+/*----------------------------------------------------------------------------*/
 int shell_putc(C_SHELL *sh, int c)
 {
-  return shell_writer(sh, (char *) &c, 1);
+  return shell_fputc(sh, SHELL_STDOUT, c);
 }
 /*----------------------------------------------------------------------------*/
 int shell_puts(C_SHELL *sh, const char *text)
 {
-  return shell_writer(sh, text, (int) strlen(text));
+  return shell_fputs(sh, SHELL_STDOUT, text);
 }
 /*----------------------------------------------------------------------------*/
 int shell_printf(C_SHELL *sh, const char *format, ...)
 {
   int r;
+  SHELL_WRITER_ARG arg;
   va_list ap;
+  arg.sh = sh;
+  arg.f = SHELL_STDOUT;
+
   va_start(ap, format);
-  r = vnprintf(shell_writer, sh, format, ap);
+  r = vnprintf(shell_writer, &arg, format, ap);
   va_end(ap);
 
   return r;
@@ -447,7 +570,10 @@ int shell_printf(C_SHELL *sh, const char *format, ...)
 /*----------------------------------------------------------------------------*/
 int shell_vprintf(C_SHELL *sh, const char *format, va_list ap)
 {
-  return vnprintf(shell_writer, sh, format, ap);
+  SHELL_WRITER_ARG arg;
+  arg.sh = sh;
+  arg.f = SHELL_STDOUT;
+  return vnprintf(shell_writer, &arg, format, ap);
 }
 /*----------------------------------------------------------------------------*/
 static C_SHELL_CONTEXT *root_context(C_SHELL *sh)
@@ -670,7 +796,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
         sh->op_id ++;
       }
 
-      r = _exec(sh, parser->argc, parser->argv);
+      r = exec0(sh, parser->argc, parser->argv);
 
       for(i = 0; i < parser->argc; i++) {
         cache_free(sh->cache, parser->argv[i]);
@@ -1057,7 +1183,245 @@ static int get_condition(C_SHELL *sh)
   return current_context(sh)->condition ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
-static int _exec(C_SHELL *sh, int argc, char **argv)
+/**Handle input/output FIFO*/
+/*
+  cmd1 | cmd2 | cmd 3 | cmd4
+  OUT    INOUT  INOUT    IN
+*/
+static int exec0(C_SHELL *sh, int argc, char **argv)
+{
+  int i, i0 = 0, arg0, r = SHELL_OK, f = 0;
+
+  arg0 = sh->parser->arg0;
+
+  for(i = 0; i < argc; i++) {
+    if(sh->parser->lex[arg0 + i].type == LEX_VERBAR) {
+      if(sh->stream.ext_handler != NULL) {
+        if(i0) {
+          sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+          sh->stream.f[SHELL_STDIN] = sh->stream.f[SHELL_STDOUT];
+          sh->stream.f[SHELL_STDOUT] = 0;
+        }
+        f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, "", SHELL_FIFO);
+        if(f < 0) {
+          r = f;
+          break;
+        }
+        sh->stream.f[SHELL_STDOUT] = f;
+      }
+
+      if(i > i0) {
+        sh->parser->arg0 = arg0 + i0;
+        r = exec1(sh, i - i0, &argv[i0]);
+        if(r < 0) {
+          break;
+        }
+      }
+      i0 = i + 1;
+    }
+  }
+
+  if(SHELL_OK == r && i > i0) {
+    if(sh->stream.ext_handler != NULL) {
+      if(i0) {
+        sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+        sh->stream.f[SHELL_STDIN] = sh->stream.f[SHELL_STDOUT];
+      }
+      sh->stream.f[SHELL_STDOUT] = 0;
+    }
+
+    sh->parser->arg0 = arg0 + i0;
+    r = exec1(sh, i - i0, &argv[i0]);
+  }
+
+
+  if(sh->stream.ext_handler != NULL) {
+    if(sh->stream.f[SHELL_STDIN] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+    }
+    if(sh->stream.f[SHELL_STDOUT] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDOUT]);
+    }
+    if(sh->stream.f[SHELL_STDERR] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDERR]);
+    }
+  }
+  sh->stream.f[SHELL_STDIN] = 0;
+  sh->stream.f[SHELL_STDOUT] = 0;
+  sh->stream.f[SHELL_STDERR] = 0;
+
+  return r;
+}
+/*----------------------------------------------------------------------------*/
+/*Handle STDIN/STDOUT/STDERR redirect
+ cmd < IN
+ cmd < IN 1> OUT 2> ERR
+ cmd  1>> OUT 2>> ERR < IN
+ cmd  2> &1
+*/
+static int exec1(C_SHELL *sh, int argc, char **argv)
+{
+  int i, i0, redirect, f;
+  int argc_new;
+  SHELL_STREAM_MODE mode;
+  SHELL_STREAM_ID stream1, stream2;
+  const char *filename;
+
+  argc_new = argc;
+
+  //Hanlde > file and < file
+  for(i = 0; i < argc - 1; i++) {
+    redirect = 0;
+    // > file
+    if(sh->parser->lex[sh->parser->arg0 + i].type == LEX_GT
+       && sh->parser->lex[sh->parser->arg0 + i + 1].type == LEX_STR
+       ) {
+      mode = SHELL_OUT;
+      stream1 = SHELL_STDOUT;
+      i0 = i;
+      filename = argv[i + 1];
+
+      if(i0 && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_GT) { //>>
+        mode = SHELL_APPEND;
+        i0 --;
+      }
+
+      //1>
+      if(i0
+         && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i0].end
+          - sh->parser->lex[sh->parser->arg0 + i0 - 1].start == 2) {
+          switch(*sh->parser->lex[sh->parser->arg0 + i0 - 1].start) {
+            case '1':
+              i0 --;
+              stream1 = SHELL_STDOUT;
+              break;
+            case '2':
+              i0 --;
+              stream1 = SHELL_STDERR;
+              break;
+          }
+        }
+
+      if(argc_new > i0) {
+        argc_new = i0;
+      }
+      redirect = 1;
+    } //> file
+
+    // < file
+    if(sh->parser->lex[sh->parser->arg0 + i].type == LEX_LT
+       && sh->parser->lex[sh->parser->arg0 + i + 1].type == LEX_STR
+       ) {
+      mode = SHELL_IN;
+      stream1 = SHELL_STDIN;
+      i0 = i;
+      filename = argv[i + 1];
+
+      // 0<
+      if(i0
+         && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i0].end
+          - sh->parser->lex[sh->parser->arg0 + i0 - 1].start == 2) {
+        switch(*sh->parser->lex[sh->parser->arg0 + i0 - 1].start) {
+          case '0':
+            i0 --;
+            break;
+        }
+      }
+
+      if(argc_new > i0) {
+        argc_new = i0;
+      }
+      redirect = 1;
+    } // < file
+
+
+    if(redirect
+      && sh->stream.ext_handler != NULL) {
+
+      if(sh->stream.f[stream1] > 0) {
+        sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[stream1]);
+        sh->stream.f[stream1] = 0;
+      }
+      f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, filename, mode);
+      if(f < 0) {
+        return f;
+      }
+      sh->stream.f[stream1] = f;
+    }
+  }
+
+  //Hanlde >&
+  for(i = 0; i < argc - 1; i++) {
+    // >&
+    if(sh->parser->lex[sh->parser->arg0 + i].type == LEX_GT
+       && sh->parser->lex[sh->parser->arg0 + i + 1].type == LEX_AMP
+       ) {
+      stream1 = stream2 = SHELL_STDOUT;
+      i0 = i;
+
+      if(i0 && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_GT) { //>>
+        i0 --;
+      }
+
+      //1>
+      if(i0
+         && sh->parser->lex[sh->parser->arg0 + i0 - 1].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i0].end
+          - sh->parser->lex[sh->parser->arg0 + i0 - 1].start == 2) {
+          switch(*sh->parser->lex[sh->parser->arg0 + i0 - 1].start) {
+            case '1':
+              i0 --;
+              stream1 = SHELL_STDOUT;
+              break;
+            case '2':
+              i0 --;
+              stream1 = SHELL_STDERR;
+              break;
+          }
+        } //1>
+
+      //&1
+      if(i < argc - 2
+         && sh->parser->lex[sh->parser->arg0 + i + 2].type == LEX_STR
+         && sh->parser->lex[sh->parser->arg0 + i + 2].end
+          - sh->parser->lex[sh->parser->arg0 + i + 1].start == 2
+         ) {
+
+        switch(*sh->parser->lex[sh->parser->arg0 + i + 2].start) {
+          case '1':
+            stream2 = SHELL_STDOUT;
+            break;
+          case '2':
+            stream2 = SHELL_STDERR;
+            break;
+        }
+      } //&1
+
+
+      if(stream1 != stream2
+         && sh->stream.ext_handler != NULL) {
+
+        if(sh->stream.f[stream1] > 0) {
+          sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[stream1]);
+          sh->stream.f[stream1] = 0;
+        }
+        sh->stream.f[stream1] = sh->stream.f[stream2];
+      }
+
+      if(argc_new > i0) {
+        argc_new = i0;
+      }
+
+    } //>&
+  }
+
+  argc = argc_new;
+  return exec3(sh, argc, argv);
+}
+/*----------------------------------------------------------------------------*/
+static int exec3(C_SHELL *sh, int argc, char **argv)
 {
   int r, i, not = 0, argc0 = 0;
   char buffer[16];
@@ -1178,7 +1542,7 @@ static int _if(C_SHELL *sh, int argc, char **argv)
 
   if(is_true_condition(sh)) {
     sh->parser->arg0 ++; //Shift args
-    r1 = _exec(sh, argc - 1, &argv[1]);
+    r1 = exec3(sh, argc - 1, &argv[1]);
     if(r1 < 0)
       return r1;
   }
@@ -1202,7 +1566,7 @@ static int _then(C_SHELL *sh, int argc, char **argv)
 
   if(argc > 1) {
     sh->parser->arg0 ++; //Shift args
-    return   _exec(sh, argc - 1, &argv[1]);
+    return   exec3(sh, argc - 1, &argv[1]);
   }
   return SHELL_OK;
 }
@@ -1229,7 +1593,7 @@ static int _else(C_SHELL *sh, int argc, char **argv)
       set_condition(sh, !get_condition(sh));
       if(argc > 1) {
         sh->parser->arg0 ++; //Shift args
-        return   _exec(sh, argc - 1, &argv[1]);
+        return   exec3(sh, argc - 1, &argv[1]);
       }
     }
     return SHELL_OK;
@@ -1290,7 +1654,7 @@ static int _while(C_SHELL *sh, int argc, char **argv)
     r = 0;
     if(argc > 1) {
       sh->parser->arg0 ++; //Shift args
-      r = _exec(sh, argc - 1, &argv[1]);
+      r = exec3(sh, argc - 1, &argv[1]);
       if(r < 0) {
         return r;
       }
@@ -1326,7 +1690,7 @@ static int _until(C_SHELL *sh, int argc, char **argv)
     r = 0;
     if(argc > 1) {
       sh->parser->arg0 ++; //Shift args
-      r = _exec(sh, argc - 1, &argv[1]);
+      r = exec3(sh, argc - 1, &argv[1]);
       if(r < 0) {
         return r;
       }
@@ -1387,7 +1751,7 @@ static int _do(C_SHELL *sh, int argc, char **argv)
 
   if(argc > 1) {
     sh->parser->arg0 ++; //Shift args
-    return   _exec(sh, argc - 1, &argv[1]);
+    return   exec3(sh, argc - 1, &argv[1]);
   }
   return SHELL_OK;
 }
@@ -1402,7 +1766,7 @@ static int _and(C_SHELL *sh, int argc, char **argv)
 
   if(argc > 1 && !cond) {
     sh->parser->arg0 ++; //Shift args
-    cond = _exec(sh, argc - 1, &argv[1]);
+    cond = exec3(sh, argc - 1, &argv[1]);
   }
   return cond;
 }
@@ -1417,7 +1781,7 @@ static int _or(C_SHELL *sh, int argc, char **argv)
 
   if(argc > 1) {
     sh->parser->arg0 ++; //Shift args
-    cond = _exec(sh, argc - 1, &argv[1]);
+    cond = exec3(sh, argc - 1, &argv[1]);
   }
   return cond;
 }
@@ -1619,7 +1983,7 @@ static int _assign(C_SHELL *sh, int argc, char **argv)
 
   if(argc > 3) {
     sh->parser->arg0 += 3; //Shift args
-    return   _exec(sh, argc - 3, &argv[3]);
+    return   exec3(sh, argc - 3, &argv[3]);
   }
 
   return SHELL_OK;
