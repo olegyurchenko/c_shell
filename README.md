@@ -20,7 +20,10 @@ c_tty supports basic line editing, understanding the keys:
 
 ## c_sh - shell for embedding your commands
 
-Built-in commands: "exit", "quit", "break", "continue", "if", "then", "fi", "else", "elif", "true", "false", "while", "until", "for", "do", "done", "echo", "test", "[", "[[", "set"
+- Built-in commands: "exit", "quit", "break", "continue", "if", "then", "fi", "else", "elif", "true", "false", "while", "until", "for", "do", "done", "echo", "test", "[", "[[", "set"
+
+- FIFO channel support:  cmd1 | cmd2 | cmd3 (with user defined external handler)
+- Redirect STDIN/STDOUT/STDERR support: cmd1 > file 2> file, cmd1 2>file >&2  (with user defined external handler)
 
 
 
