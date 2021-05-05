@@ -50,7 +50,6 @@
 /*----------------------------------------------------------------------------*/
 #define DEBUG_MOODE
 /*----------------------------------------------------------------------------*/
-/*----------------------------------------------------------------------------*/
 static int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
 static void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size);
 static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size);
@@ -126,6 +125,15 @@ C_SHELL *shell_alloc()
     FREE(sh);
     return NULL;
   }
+  //Intern stream handler;
+  sh->stream.ext_handler = cache_alloc(sh->cache, sizeof(SHELL_STREAM_HANDLER));
+  if(sh->stream.ext_handler != NULL) {
+    sh->stream.ext_handler->data = sh;
+    sh->stream.ext_handler->_open = sh_stream_open;
+    sh->stream.ext_handler->_close = sh_stream_close;
+    sh->stream.ext_handler->_read = sh_stream_read;
+    sh->stream.ext_handler->_write = sh_stream_write;
+  }
 
   return sh;
 }
@@ -139,6 +147,20 @@ void shell_reset(C_SHELL *sh)
   set_context_should_store_cache(sh, 0);
   sh_remove_cache(sh);
   clear_vars(sh);
+  if(sh->stream.ext_handler != NULL) {
+    if(sh->stream.f[SHELL_STDIN] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+    }
+    if(sh->stream.f[SHELL_STDOUT] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDOUT]);
+    }
+    if(sh->stream.f[SHELL_STDERR] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDERR]);
+    }
+  }
+  sh->stream.f[SHELL_STDIN] = 0;
+  sh->stream.f[SHELL_STDOUT] = 0;
+  sh->stream.f[SHELL_STDERR] = 0;
 }
 /*----------------------------------------------------------------------------*/
 void shell_free(C_SHELL *sh)
@@ -338,7 +360,7 @@ C_SHELL_CONTEXT *sh_current_context(C_SHELL *sh)
   return c;
 }
 /*----------------------------------------------------------------------------*/
-static C_SHEL_VAR *find_var(C_SHELL *sh, unsigned hash, C_SHEL_VAR **prior /*=NULL*/)
+C_SHEL_VAR *sh_find_var(C_SHELL *sh, unsigned hash, C_SHEL_VAR **prior /*=NULL*/)
 {
   C_SHEL_VAR *n;
   if(prior != NULL)
@@ -367,7 +389,7 @@ int sh_set_var(C_SHELL *sh, const char *name, const char *value)
   }
 
   hash = sh_hash(name);
-  n = find_var(sh, hash, &prev);
+  n = sh_find_var(sh, hash, &prev);
   if(!size) {
     //Remove var
     if(n != NULL) {
@@ -437,7 +459,7 @@ const char *sh_get_var(C_SHELL *sh, const char *name)
   unsigned hash;
 
   hash = sh_hash(name);
-  v = find_var(sh, hash, NULL);
+  v = sh_find_var(sh, hash, NULL);
   if(v == NULL) {
     return &empy;
   }

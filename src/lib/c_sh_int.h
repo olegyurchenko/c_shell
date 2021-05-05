@@ -166,6 +166,7 @@ int sh_remove_cache(C_SHELL *sh);
 void sh_set_cache_mode(C_SHELL *sh, int mode);
 int sh_is_cache_mode(C_SHELL *sh);
 
+C_SHEL_VAR *sh_find_var(C_SHELL *sh, unsigned hash, C_SHEL_VAR **prior /*=NULL*/);
 int sh_set_var(C_SHELL *sh, const char *name, const char *value);
 const char *sh_get_var(C_SHELL *sh, const char *name);
 

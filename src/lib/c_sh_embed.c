@@ -46,6 +46,29 @@
 static int intern_test(C_SHELL *sh, int argc, char **argv);
 #endif //USE_SH_TEST
 /*----------------------------------------------------------------------------*/
+/**Embeded functions*/
+static int sh_exit(C_SHELL *sh, int argc, char **argv);
+static int sh_break(C_SHELL *sh, int argc, char **argv);
+static int sh_continue(C_SHELL *sh, int argc, char **argv);
+static int sh_if(C_SHELL *sh, int argc, char **argv);
+static int sh_then(C_SHELL *sh, int argc, char **argv);
+static int sh_fi(C_SHELL *sh, int argc, char **argv);
+static int sh_else(C_SHELL *sh, int argc, char **argv);
+static int sh_elif(C_SHELL *sh, int argc, char **argv);
+static int sh_true(C_SHELL *sh, int argc, char **argv);
+static int sh_false(C_SHELL *sh, int argc, char **argv);
+static int sh_while(C_SHELL *sh, int argc, char **argv);
+static int sh_until(C_SHELL *sh, int argc, char **argv);
+static int sh_for(C_SHELL *sh, int argc, char **argv);
+static int sh_do(C_SHELL *sh, int argc, char **argv);
+static int sh_done(C_SHELL *sh, int argc, char **argv);
+static int sh_echo(C_SHELL *sh, int argc, char **argv);
+static int sh_test(C_SHELL *sh, int argc, char **argv);
+static int sh_set(C_SHELL *sh, int argc, char **argv);
+static int sh_assign(C_SHELL *sh, int argc, char **argv);
+static int sh_and(C_SHELL *sh, int argc, char **argv);
+static int sh_or(C_SHELL *sh, int argc, char **argv);
+/*----------------------------------------------------------------------------*/
 typedef struct {
   unsigned hash;
   const char *name;

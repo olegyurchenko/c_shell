@@ -21,28 +21,11 @@ extern "C" {
 #endif /*__cplusplus*/
 
 int sh_embed_exec(C_SHELL *sh, int argc, char **argv);
-/**Embeded functions*/
-int sh_exit(C_SHELL *sh, int argc, char **argv);
-int sh_break(C_SHELL *sh, int argc, char **argv);
-int sh_continue(C_SHELL *sh, int argc, char **argv);
-int sh_if(C_SHELL *sh, int argc, char **argv);
-int sh_then(C_SHELL *sh, int argc, char **argv);
-int sh_fi(C_SHELL *sh, int argc, char **argv);
-int sh_else(C_SHELL *sh, int argc, char **argv);
-int sh_elif(C_SHELL *sh, int argc, char **argv);
-int sh_true(C_SHELL *sh, int argc, char **argv);
-int sh_false(C_SHELL *sh, int argc, char **argv);
-int sh_while(C_SHELL *sh, int argc, char **argv);
-int sh_until(C_SHELL *sh, int argc, char **argv);
-int sh_for(C_SHELL *sh, int argc, char **argv);
-int sh_do(C_SHELL *sh, int argc, char **argv);
-int sh_done(C_SHELL *sh, int argc, char **argv);
-int sh_echo(C_SHELL *sh, int argc, char **argv);
-int sh_test(C_SHELL *sh, int argc, char **argv);
-int sh_set(C_SHELL *sh, int argc, char **argv);
-int sh_assign(C_SHELL *sh, int argc, char **argv);
-int sh_and(C_SHELL *sh, int argc, char **argv);
-int sh_or(C_SHELL *sh, int argc, char **argv);
+
+int sh_stream_open(void *data, const char* name, SHELL_STREAM_MODE mode);
+int sh_stream_close(void *data, int f);
+int sh_stream_read(void *data, int f, void* buf, unsigned size);
+int sh_stream_write(void *data, int f, const void* buf, unsigned size);
 
 #ifdef __cplusplus
 } //extern "C"
