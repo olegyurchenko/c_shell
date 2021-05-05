@@ -140,6 +140,7 @@ C_SHELL *shell_alloc()
 /*----------------------------------------------------------------------------*/
 void shell_reset(C_SHELL *sh)
 {
+  C_SHELL_INTERN_STREAM *s;
   while(context_stack(sh)) {
     sh_pop_context(sh);
   }
@@ -161,6 +162,15 @@ void shell_reset(C_SHELL *sh)
   sh->stream.f[SHELL_STDIN] = 0;
   sh->stream.f[SHELL_STDOUT] = 0;
   sh->stream.f[SHELL_STDERR] = 0;
+
+  while(sh->intern_stream != NULL) {
+    s = sh->intern_stream;
+    sh->intern_stream = s->next;
+    if(s->buffer != NULL) {
+      cache_free(sh->cache, s->buffer);
+    }
+    cache_free(sh->cache, s);
+  }
 }
 /*----------------------------------------------------------------------------*/
 void shell_free(C_SHELL *sh)

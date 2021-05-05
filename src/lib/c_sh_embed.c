@@ -65,9 +65,9 @@ static int sh_done(C_SHELL *sh, int argc, char **argv);
 static int sh_echo(C_SHELL *sh, int argc, char **argv);
 static int sh_test(C_SHELL *sh, int argc, char **argv);
 static int sh_set(C_SHELL *sh, int argc, char **argv);
-static int sh_assign(C_SHELL *sh, int argc, char **argv);
 static int sh_and(C_SHELL *sh, int argc, char **argv);
 static int sh_or(C_SHELL *sh, int argc, char **argv);
+static int sh_read(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 typedef struct {
   unsigned hash;
@@ -99,6 +99,7 @@ static const STD_FN std_fn[] = {
   , {0x0b88a991, "set", sh_set}
   , {0x00596f51, "&&", sh_and}
   , {0x00597abd, "||", sh_or}
+  , {0x7c9d4d41, "read", sh_read}
 };
 /*----------------------------------------------------------------------------
 """
@@ -129,7 +130,9 @@ names = ("exit"
 , "test"
 , "["
 , "[["
-, "set")
+, "set"
+, "read"
+)
 
 comma = " "
 print()
@@ -624,6 +627,242 @@ int sh_assign(C_SHELL *sh, int argc, char **argv)
   }
 
   return SHELL_OK;
+}
+/*----------------------------------------------------------------------------*/
+int sh_read(C_SHELL *sh, int argc, char **argv)
+{
+  char *buffer, *p0, *p1;
+  unsigned buffer_size = 16 * 1024;
+  int ret = SHELL_OK, r, eof, i = 0;
+  const char *IFS;
+  const char blanks[] = " \t\r\n";
+
+  buffer = (char *) cache_alloc(sh->cache, buffer_size);
+  if(buffer == NULL) {
+    return SHELL_ERR_MALLOC;
+  }
+
+  do {
+
+    while (i < (int) (buffer_size - 1)) {
+      r = shell_read(sh, &buffer[i], 1);
+      if(r == 0 || buffer[i] == '\n') {
+        break;
+      }
+      if(r < 0) {
+        ret = r;
+        break;
+      }
+      i ++;
+    }
+
+    if(ret < 0) {
+      break;
+    }
+
+    buffer[i] = 0;
+    p0 = buffer;
+    IFS = sh_get_var(sh, "IFS");
+    if(!*IFS) {
+      IFS = blanks;
+    }
+    for(i = 1; i < argc; i++) {
+      p1 = p0;
+      while (*p1 && !strchr(IFS, *p1)) {
+        p1 ++;
+      }
+      eof = *p1 == 0;
+      *p1 = 0;
+      if((r = sh_set_var(sh, argv[i], p0)) < 0) {
+        ret = r;
+        break;
+      }
+      if(eof) {
+        break;
+      }
+      p0 = p1 + 1;
+      while (*p0 && strchr(IFS, *p0)) {
+        p0 ++;
+      }
+      eof = *p0 == 0;
+      if(eof) {
+        break;
+      }
+    }
+
+    if(!eof) {
+      if((r = sh_set_var(sh, "REPLY", p0)) < 0) {
+        ret = r;
+        break;
+      }
+    } else {
+      if((r = sh_set_var(sh, "REPLY", "")) < 0) {
+        ret = r;
+        break;
+      }
+      for(i++ ; i < argc; i++) {
+        if((r = sh_set_var(sh, argv[i], "")) < 0) {
+          ret = r;
+          break;
+        }
+      }
+    }
+  } while(0);
+  cache_free(sh->cache, buffer);
+  return ret;
+}
+/*----------------------------------------------------------------------------*/
+int sh_stream_open(void *data, const char* name, SHELL_STREAM_MODE mode)
+{
+  int fd = 1;
+  C_SHELL *sh;
+  C_SHELL_INTERN_STREAM *stream;
+  unsigned h = 0;
+
+  if(mode != SHELL_FIFO) {
+    h = sh_hash(name);
+  }
+
+  sh = (C_SHELL *) data;
+  stream = sh->intern_stream;
+  while (stream != NULL) {
+    if(fd <= stream->fd) {
+      fd = stream->fd + 1;
+    }
+
+    if(mode != SHELL_FIFO && h == stream->hash) {
+       break;
+    }
+
+    stream = stream->next;
+  }
+
+  if(stream == NULL) {
+    stream = (C_SHELL_INTERN_STREAM *) cache_alloc(sh->cache, sizeof(C_SHELL_INTERN_STREAM));
+    if(stream == NULL) {
+      return SHELL_ERR_MALLOC;
+    }
+    memset(stream, 0, sizeof(C_SHELL_INTERN_STREAM));
+    stream->fd = fd;
+    stream->hash = h;
+    if(name != NULL && mode != SHELL_FIFO) {
+      strncpy(stream->name, name, sizeof(stream->name));
+      stream->name[sizeof(stream->name) - 1] = 0;
+    }
+    stream->next = sh->intern_stream;
+    sh->intern_stream = stream;
+  }
+
+  if(mode == SHELL_OUT) {
+    stream->size = 0;
+  }
+  stream->position = 0;
+  return stream->fd;
+}
+/*----------------------------------------------------------------------------*/
+int sh_stream_close(void *data, int f)
+{
+  C_SHELL *sh;
+  C_SHELL_INTERN_STREAM *stream, *prev = NULL;
+
+  sh = (C_SHELL *) data;
+  stream = sh->intern_stream;
+  while (stream != NULL) {
+    if(f == stream->fd) {
+      if(!*stream->name) {
+        //FIFO
+        if(prev != NULL) {
+          prev->next = stream->next;
+        } else {
+          sh->intern_stream = stream->next;
+        }
+        if(stream->buffer != NULL) {
+          cache_free(sh->cache, stream->buffer);
+        }
+        cache_free(sh->cache, stream);
+      }
+      break;
+    }
+
+
+    prev = stream;
+    stream = stream->next;
+  }
+  return SHELL_OK;
+}
+/*----------------------------------------------------------------------------*/
+int sh_stream_read(void *data, int f, void* buf, unsigned size)
+{
+  C_SHELL *sh;
+  C_SHELL_INTERN_STREAM *stream;
+  char *dst;
+  int r = 0;
+
+  sh = (C_SHELL *) data;
+  stream = sh->intern_stream;
+  dst = (char *)buf;
+  while (stream != NULL) {
+    if(f == stream->fd) {
+      break;
+    }
+    stream = stream->next;
+  }
+  if(stream == NULL) {
+    return SHELL_ERROR_OPEN_FILE;
+  }
+
+  while(size && stream->position < stream->size) {
+    dst[r] = stream->buffer[stream->position];
+    size --;
+    stream->position ++;
+    r ++;
+  }
+  return r;
+}
+/*----------------------------------------------------------------------------*/
+int sh_stream_write(void *data, int f, const void* buf, unsigned size)
+{
+  C_SHELL *sh;
+  C_SHELL_INTERN_STREAM *stream;
+  const char *src;
+  char *buffer;
+  int r = 0;
+  unsigned allocated;
+
+  sh = (C_SHELL *) data;
+  stream = sh->intern_stream;
+  src = (const char *)buf;
+  while (stream != NULL) {
+    if(f == stream->fd) {
+      break;
+    }
+    stream = stream->next;
+  }
+  if(stream == NULL) {
+    return SHELL_ERROR_OPEN_FILE;
+  }
+
+  while(size) {
+    if(stream->size >= stream->allocated || stream->buffer == NULL) {
+      allocated = stream->allocated + (size < 1024 ? 1024 : size);
+      if(stream->buffer == NULL) {
+        buffer = (char *) cache_alloc(sh->cache, allocated);
+      } else {
+        buffer = (char *) cache_realloc(sh->cache, stream->buffer, allocated);
+      }
+      if(buffer == NULL) {
+        return SHELL_ERR_MALLOC;
+      }
+      stream->allocated = allocated;
+      stream->buffer = buffer;
+    }
+    stream->buffer[stream->size] = src[r];
+    stream->size ++;
+    size --;
+    r ++;
+  }
+
+  return r;
 }
 /*----------------------------------------------------------------------------*/
 #ifndef USE_SH_TEST

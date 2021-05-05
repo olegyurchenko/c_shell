@@ -43,9 +43,10 @@ static const char *shell_commands[] = {
   , "["
   , "[["
   , "set"
+  , "read"
 //  , "test_1" //TEST
 //  , "test_2" //TEST
-  , "read" //test
+  , "rr" //test
 };
 /*----------------------------------------------------------------------------*/
 typedef struct {
@@ -75,7 +76,7 @@ void ts_init(TEST_SHELL_DATA *data)
   stream_handler.handler._close = _close;
   stream_handler.handler._read = _read;
   stream_handler.handler._write = _write;
-  shell_set_stream_handler(data->sh, &stream_handler.handler);
+  //shell_set_stream_handler(data->sh, &stream_handler.handler);
   for(i = 0; i < MAX_STREAM_COUNT; i++) {
     stream_handler.streams[i].mode = -1;
   }
@@ -95,7 +96,7 @@ static int cmd_read(void *arg, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 int ts_exec(void *arg, int argc, char **argv)
 {
-  if(!strcmp(argv[0], "read")) {
+  if(!strcmp(argv[0], "rr")) {
     return cmd_read(arg, argc, argv);
   }
   return SHELL_ERR_COMMAND_NOT_FOUND;

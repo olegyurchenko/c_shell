@@ -102,6 +102,18 @@ struct C_SHELL_CONTEXT_TAG {
 };
 typedef struct C_SHELL_CONTEXT_TAG C_SHELL_CONTEXT;
 /*----------------------------------------------------------------------------*/
+struct C_SHELL_INTERN_STREAM_TAG {
+  int fd;
+  unsigned size;
+  unsigned position;
+  unsigned allocated;
+  unsigned hash;
+  char name[VAR_NAME_LENGTH];
+  char *buffer;
+  struct C_SHELL_INTERN_STREAM_TAG *next;
+};
+typedef struct C_SHELL_INTERN_STREAM_TAG C_SHELL_INTERN_STREAM;
+/*----------------------------------------------------------------------------*/
 struct C_SHELL_TAG {
   struct {
     SHELL_PRINT_CB cb;
@@ -127,6 +139,7 @@ struct C_SHELL_TAG {
   C_SHELL_CONTEXT context;
   C_SHELL_PARSER *parser;
   C_SHEL_VAR *vars;
+  C_SHELL_INTERN_STREAM *intern_stream;
 
   int op_id;
   int cache_stack;

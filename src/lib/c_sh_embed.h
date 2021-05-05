@@ -21,6 +21,7 @@ extern "C" {
 #endif /*__cplusplus*/
 
 int sh_embed_exec(C_SHELL *sh, int argc, char **argv);
+int sh_assign(C_SHELL *sh, int argc, char **argv);
 
 int sh_stream_open(void *data, const char* name, SHELL_STREAM_MODE mode);
 int sh_stream_close(void *data, int f);
