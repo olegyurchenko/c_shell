@@ -1354,7 +1354,7 @@ static char otoc(const char **src)
   return (char) c;
 }
 /*----------------------------------------------------------------------------*/
-static unsigned var_subst(C_SHELL *sh, const char *begin, const char *end, char *buffer, unsigned buffer_size)
+static unsigned var_substitution(C_SHELL *sh, const char *begin, const char *end, char *buffer, unsigned buffer_size)
 {
   char *name = NULL;
   const char *value;
@@ -1386,7 +1386,7 @@ static unsigned var_subst(C_SHELL *sh, const char *begin, const char *end, char 
   return i;
 }
 /*----------------------------------------------------------------------------*/
-static unsigned var_substitution(C_SHELL *sh, const char **src, unsigned size, char *buffer, unsigned buffer_size)
+static unsigned substitutions(C_SHELL *sh, const char **src, unsigned size, char *buffer, unsigned buffer_size)
 {
   static const char delimiters[] = "}$/\\ \t+*-=><!$&()";
   const char *p;
@@ -1395,13 +1395,13 @@ static unsigned var_substitution(C_SHELL *sh, const char **src, unsigned size, c
 
   for(i = 0; i < size; i++) {
     if(strchr(delimiters, p[i]) != NULL) {
-      dst_index = var_subst(sh, *src, &p[i], buffer, buffer_size);
+      dst_index = var_substitution(sh, *src, &p[i], buffer, buffer_size);
       break;
     }
   }
 
   if(i >= size) {
-    dst_index = var_subst(sh, *src, &p[size], buffer, buffer_size);
+    dst_index = var_substitution(sh, *src, &p[size], buffer, buffer_size);
   }
 
   *src = &p[i];
@@ -1472,7 +1472,7 @@ static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, u
 
     if(*p == '$' && use_vars) {
       p ++;
-      i += var_substitution(sh, &p, end - p, &buffer[i], buffer_size - i);
+      i += substitutions(sh, &p, end - p, &buffer[i], buffer_size - i);
       continue;
     }
     buffer[i ++] = *p;
