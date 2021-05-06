@@ -529,58 +529,71 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
   int i, r = SHELL_OK;
   const char *end;
   unsigned size;
-  C_SHELL_PARSER *parser = NULL;
 
-  parser = (C_SHELL_PARSER *) cache_alloc(sh->cache, sizeof(C_SHELL_PARSER));
-  if(parser == NULL) {
+  typedef struct {
+    C_SHELL_PARSER parser;
+    const char *start;
+    const char *end;
+    char source[1];
+  } exec_str_t;
+
+  exec_str_t *data;
+
+  size = strlen(str);
+  data = (exec_str_t *) cache_alloc(sh->cache, sizeof(exec_str_t) + size);
+  if(data == NULL) {
     return SHELL_ERR_MALLOC;
   }
-  memset(parser, 0, sizeof(C_SHELL_PARSER));
+  memset(data, 0, sizeof(exec_str_t) + size);
+  memcpy(data->source, str, size);
+  str = data->source;
 
   while(1) {
     end = NULL;
     size = strlen(str);
-    for(i = 0; i < MAX_LEXER_SIZE; i++) {
-      parser->argv[i] = NULL;
-    }
-    parser->arg0 = 0;
-    parser->argc = 0;
-    sh->parser = parser;
+    data->parser.arg0 = 0;
+    data->parser.argc = 0;
+    sh->parser = &data->parser;
 
-    r = lexer(str, size, &end, parser->lex, MAX_LEXER_SIZE);
+    r = lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
       break;
     }
 
     if(r) {
-      if(parser->lex[r - 1].type == LEX_COMMENT)
+      if(data->parser.lex[r - 1].type == LEX_COMMENT)
         r --;
     }
 
     if(r) {
-      parser->argc = r;
+      data->parser.argc = r;
+      data->start = data->parser.lex[0].start,
+      data->end = data->parser.lex[data->parser.argc - 1].end;
+
       if(sh_is_lex_debug_mode(sh)) {
-        lex_print(sh, parser->lex, parser->argc);
+        lex_print(sh, data->parser.lex, data->parser.argc);
       }
 
-      r = args_prepare(sh, parser->lex, parser->argc, parser->argv);
+      r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
       if(r < 0) {
         break;
       }
 
       if(sh_is_pars_debug_mode(sh)) {
-        args_print(sh, parser->argc, parser->argv);
+        args_print(sh, data->parser.argc, data->parser.argv);
       }
 
       if(!from_cache) {
         sh->op_id ++;
       }
 
-      r = exec0(sh, parser->argc, parser->argv);
+      r = exec0(sh, data->parser.argc, data->parser.argv);
 
-      for(i = 0; i < parser->argc; i++) {
-        cache_free(sh->cache, parser->argv[i]);
-        parser->argv[i] = NULL;
+      for(i = 0; i < MAX_LEXER_SIZE; i++) {
+        if(data->parser.argv[i] != NULL) {
+          cache_free(sh->cache, data->parser.argv[i]);
+          data->parser.argv[i] = NULL;
+        }
       }
 
       if(r < 0) {
@@ -588,13 +601,8 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
       }
 
 
-      if(parser->argc > 0 //Check: argc may be changed by exec
-         && !from_cache
-         ) {
-        r = add_src_to_cache(sh,
-                             parser->lex[0].start,
-            parser->lex[parser->argc - 1].end - parser->lex[0].start
-            );
+      if(!from_cache) {
+        r = add_src_to_cache(sh, data->start, data->end - data->start);
         if(r < 0) {
           break;
         }
@@ -608,7 +616,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     break;
   }
 
-  cache_free(sh->cache, parser);
+  cache_free(sh->cache, data);
   sh->parser = NULL;
   return r;
 }
@@ -977,9 +985,10 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
 {
   int i, f = 0, r, ret = SHELL_OK, delta;
   const char *end;
+  unsigned buffer_size = 16 * 1024;
+  char *buffer = NULL;
 
   typedef struct {
-    char buffer[16 * 1024];
     C_SHELL_PARSER parser;
 
   } command_substitution_t;
@@ -1007,15 +1016,21 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
       break;
     }
     memset(data, 0, sizeof(command_substitution_t));
+    buffer = (char *) cache_alloc(sh->cache, buffer_size);
+    if(buffer == NULL) {
+      ret = SHELL_ERR_MALLOC;
+      break;
+    }
+
     //Read command output
     i = 0;
-     while (i < (int) sizeof(data->buffer)) {
-      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &data->buffer[i], 1);
+     while (i < (int) buffer_size) {
+      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[i], 1);
       if(r < 0) {
         ret = r;
         break;
       }
-      if(r == 0 || !data->buffer[i] || data->buffer[i] == '\n') {
+      if(r == 0 || !buffer[i] || buffer[i] == '\n') {
         break;
       }
       i ++;
@@ -1024,12 +1039,13 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
     if(SHELL_OK != ret) {
       break;
     }
+    buffer[i] = 0;
 
     //Parse string
     data->parser.arg0 = 0;
     data->parser.argc = 0;
 
-    r = lexer(data->buffer, i, &end, data->parser.lex, MAX_LEXER_SIZE);
+    r = lexer(buffer, i, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
       ret = r;
       break;
@@ -1058,11 +1074,13 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
     for(i = argend; delta < 0 && i < sh->parser->argc; i++) {
       sh->parser->argv[i + delta] = sh->parser->argv[i];
       sh->parser->lex[i + delta] = sh->parser->lex[i];
+      sh->parser->argv[i] = NULL;
     }
 
     for(i = sh->parser->argc - 1; delta > 0 && i >= argend; i--) {
       sh->parser->argv[i + delta] = sh->parser->argv[i];
       sh->parser->lex[i + delta] = sh->parser->lex[i];
+      sh->parser->argv[i] = NULL;
     }
     sh->parser->argc += delta;
     for(i = 0; i < data->parser.argc; i++) {
@@ -1070,6 +1088,16 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
       sh->parser->lex[i + arg0] = data->parser.lex[i];
     }
     //argv substitution end
+
+    //Save buffer to argv[argc] - it will be released later
+    for(i = sh->parser->argc; i < MAX_LEXER_SIZE; i++) {
+      if(sh->parser->argv[i] == NULL) {
+        sh->parser->argv[i] = buffer;
+        break;
+      }
+    }
+    buffer = NULL;
+
   } while(0);
 
   if(f > 0) {
@@ -1078,6 +1106,9 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
 
   if(data != NULL) {
     cache_free(sh->cache, data);
+  }
+  if(buffer != NULL) {
+    cache_free(sh->cache, buffer);
   }
   return ret;
 }
@@ -1089,9 +1120,47 @@ $(cmd)
 */
 static int exec0(C_SHELL *sh, int argc, char **argv)
 {
-  (void) argc;
-  (void) argv;
-  return exec1(sh, sh->parser->argc, &sh->parser->argv[sh->parser->arg0], 0);
+  int i, start, end, ret = SHELL_OK;
+
+  while (1) {
+
+    start = end = -1;
+
+    //Find $(
+    for(i = 0; i < argc - 1; i++) {
+      if(sh->parser->lex[i].type == LEX_STR
+         && sh->parser->lex[i].end - sh->parser->lex[i].start == 1
+         && *sh->parser->lex[i].start == '$'
+         && sh->parser->lex[i+1].type == LEX_LPAREN) {
+        start = i;
+      }
+    }
+
+    if(start == -1) {
+      break;
+    }
+
+    for(i = start; i < argc; i++) {
+      if(sh->parser->lex[i].type == LEX_RPAREN) {
+        end = i;
+        break;
+      }
+    }
+
+    if(end == -1) {
+      //No closed )
+      break;
+    }
+
+    sh->parser->arg0 = start + 2;
+    if((ret = command_substitution(sh, end - start - 2, &argv[start + 2], start, end + 1)) < 0) {
+      break;
+    }
+    argc = sh->parser->argc;
+    sh->parser->arg0 = 0;
+  }
+
+  return exec1(sh, argc, argv, 0);
 }
 /*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/
