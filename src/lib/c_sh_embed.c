@@ -68,6 +68,7 @@ static int sh_set(C_SHELL *sh, int argc, char **argv);
 static int sh_and(C_SHELL *sh, int argc, char **argv);
 static int sh_or(C_SHELL *sh, int argc, char **argv);
 static int sh_read(C_SHELL *sh, int argc, char **argv);
+static int sh_tea(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 typedef struct {
   unsigned hash;
@@ -100,6 +101,7 @@ static const STD_FN std_fn[] = {
   , {0x00596f51, "&&", sh_and}
   , {0x00597abd, "||", sh_or}
   , {0x7c9d4d41, "read", sh_read}
+  , {0x0b88adbf, "tea", sh_tea}
 };
 /*----------------------------------------------------------------------------
 """
@@ -709,6 +711,79 @@ int sh_read(C_SHELL *sh, int argc, char **argv)
     }
   } while(0);
   cache_free(sh->cache, buffer);
+  return ret;
+}
+/*----------------------------------------------------------------------------*/
+static int sh_tea(C_SHELL *sh, int argc, char **argv)
+{
+  int i, count = 0, ret = SHELL_OK, r, size;
+  SHELL_STREAM_MODE mode = SHELL_OUT;
+
+  typedef struct {
+    char buffer[16*1024];
+    int fd[16];
+  } sh_tea_t;
+
+  sh_tea_t *data;
+  if(sh->stream.ext_handler == NULL) {
+    return SHELL_ERR_NOT_IMPLEMENT;
+  }
+
+  data = (sh_tea_t *) cache_alloc(sh->cache, sizeof(sh_tea_t));
+  if(data == NULL) {
+    return SHELL_ERR_MALLOC;
+  }
+  memset(data, 0, sizeof(sh_tea_t));
+
+  do {
+
+    for(i = 1; i < argc && count < (int) (sizeof(data->fd)/ sizeof(data->fd[0])); i++) {
+      if(!strcmp(argv[i], "-a") || !strcmp(argv[i], "--append")) {
+        mode = SHELL_APPEND;
+        continue;
+      }
+
+      data->fd[count] = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, argv[i], mode);
+      if(data->fd[count] <= 0) {
+        ret = SHELL_ERROR_OPEN_FILE;
+        break;
+      }
+      count ++;
+    }
+
+    while(1) {
+      r = shell_read(sh, data->buffer, sizeof(data->buffer));
+      if(r < 0) {
+        ret = r;
+        break;
+      }
+      if(!r) {
+        break;
+      }
+
+      size = r;
+      for(i = 0; i < count; i++) {
+        if(data->fd[i] > 0) {
+          if((r = sh->stream.ext_handler->_write(sh->stream.ext_handler->data, data->fd[i], data->buffer, size)) < 0) {
+            ret = r;
+            break;
+          }
+        }
+      }
+
+      if((r = shell_write(sh, SHELL_STDOUT, data->buffer, size)) < 0) {
+        ret = r;
+        break;
+      }
+    }
+
+  } while(0);
+  for(i = 0; i < count; i++) {
+    if(data->fd[i] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, data->fd[i]);
+    }
+  }
+  cache_free(sh->cache, data);
   return ret;
 }
 /*----------------------------------------------------------------------------*/

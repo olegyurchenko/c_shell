@@ -44,6 +44,7 @@ static const char *shell_commands[] = {
   , "[["
   , "set"
   , "read"
+  , "tea"
 //  , "test_1" //TEST
 //  , "test_2" //TEST
   , "rr" //test
