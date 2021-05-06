@@ -62,7 +62,8 @@ static int add_src_to_cache(C_SHELL *sh, const char *src, unsigned size);
 static void set_context_should_store_cache(C_SHELL *sh, int should_store);
 /*----------------------------------------------------------------------------*/
 static int exec0(C_SHELL *sh, int argc, char **argv);
-static int exec1(C_SHELL *sh, int argc, char **argv);
+static int exec1(C_SHELL *sh, int argc, char **argv, int stdout);
+static int exec2(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 const char *shell_err_string(C_SHELL *sh, int err)
 {
@@ -972,12 +973,134 @@ int sh_get_condition(C_SHELL *sh)
   return sh_current_context(sh)->condition ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
+static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, int argend)
+{
+  int i, f = 0, r, ret = SHELL_OK, delta;
+  const char *end;
+
+  typedef struct {
+    char buffer[16 * 1024];
+    C_SHELL_PARSER parser;
+
+  } command_substitution_t;
+
+  command_substitution_t *data = NULL;
+
+  if(sh->stream.ext_handler == NULL) {
+    return SHELL_ERR_NOT_IMPLEMENT;
+  }
+
+  //Open output stream
+  f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, "", SHELL_FIFO);
+  if(f <= 0) {
+    return f < 0 ? f : SHELL_ERROR_OPEN_FILE;
+  }
+  do {
+    //Execute command
+    if((ret = exec1(sh, argc, argv, f)) != SHELL_OK) {
+      break;
+    }
+
+    data = (command_substitution_t *) cache_alloc(sh->cache, sizeof(command_substitution_t));
+    if(data == NULL) {
+      ret = SHELL_ERR_MALLOC;
+      break;
+    }
+    memset(data, 0, sizeof(command_substitution_t));
+    //Read command output
+    i = 0;
+     while (i < (int) sizeof(data->buffer)) {
+      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &data->buffer[i], 1);
+      if(r < 0) {
+        ret = r;
+        break;
+      }
+      if(r == 0 || !data->buffer[i] || data->buffer[i] == '\n') {
+        break;
+      }
+      i ++;
+    }
+
+    if(SHELL_OK != ret) {
+      break;
+    }
+
+    //Parse string
+    data->parser.arg0 = 0;
+    data->parser.argc = 0;
+
+    r = lexer(data->buffer, i, &end, data->parser.lex, MAX_LEXER_SIZE);
+    if(r < 0) {
+      ret = r;
+      break;
+    }
+
+
+    if(r) {
+      data->parser.argc = r;
+
+      r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
+      if(r < 0) {
+        ret = r;
+        break;
+      }
+    }
+    //Parse string end
+
+    //argv substitution
+    for(i = arg0; i < argend; i++) {
+      cache_free(sh->cache, sh->parser->argv[i]);
+      sh->parser->argv[i] = NULL;
+    }
+
+    //argend = 8, arg0 = 3, newargc = 4 delta = -1
+    delta = data->parser.argc - argend + arg0;
+    for(i = argend; delta < 0 && i < sh->parser->argc; i++) {
+      sh->parser->argv[i + delta] = sh->parser->argv[i];
+      sh->parser->lex[i + delta] = sh->parser->lex[i];
+    }
+
+    for(i = sh->parser->argc - 1; delta > 0 && i >= argend; i--) {
+      sh->parser->argv[i + delta] = sh->parser->argv[i];
+      sh->parser->lex[i + delta] = sh->parser->lex[i];
+    }
+    sh->parser->argc += delta;
+    for(i = 0; i < data->parser.argc; i++) {
+      sh->parser->argv[i + arg0] = data->parser.argv[i];
+      sh->parser->lex[i + arg0] = data->parser.lex[i];
+    }
+    //argv substitution end
+  } while(0);
+
+  if(f > 0) {
+    sh->stream.ext_handler->_close(sh->stream.ext_handler->data, f);
+  }
+
+  if(data != NULL) {
+    cache_free(sh->cache, data);
+  }
+  return ret;
+}
+/*----------------------------------------------------------------------------*/
+//Handle Command substitution
+/*
+$(cmd)
+`cmd`
+*/
+static int exec0(C_SHELL *sh, int argc, char **argv)
+{
+  (void) argc;
+  (void) argv;
+  return exec1(sh, sh->parser->argc, &sh->parser->argv[sh->parser->arg0], 0);
+}
+/*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/
 /*
   cmd1 | cmd2 | cmd 3 | cmd4
   OUT    INOUT  INOUT    IN
 */
-static int exec0(C_SHELL *sh, int argc, char **argv)
+//Param stdout - File descriptor - where to redirect the latter in the chain output
+static int exec1(C_SHELL *sh, int argc, char **argv, int stdout)
 {
   int i, i0 = 0, arg0, r = SHELL_OK, f = 0;
 
@@ -1001,7 +1124,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
 
       if(i > i0) {
         sh->parser->arg0 = arg0 + i0;
-        r = exec1(sh, i - i0, &argv[i0]);
+        r = exec2(sh, i - i0, &argv[i0]);
         if(r < 0) {
           break;
         }
@@ -1016,11 +1139,11 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
         sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
         sh->stream.f[SHELL_STDIN] = sh->stream.f[SHELL_STDOUT];
       }
-      sh->stream.f[SHELL_STDOUT] = 0;
+      sh->stream.f[SHELL_STDOUT] = stdout;
     }
 
     sh->parser->arg0 = arg0 + i0;
-    r = exec1(sh, i - i0, &argv[i0]);
+    r = exec2(sh, i - i0, &argv[i0]);
   }
 
 
@@ -1028,7 +1151,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
     if(sh->stream.f[SHELL_STDIN] > 0) {
       sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
     }
-    if(sh->stream.f[SHELL_STDOUT] > 0) {
+    if(sh->stream.f[SHELL_STDOUT] > 0 && sh->stream.f[SHELL_STDOUT] != stdout) {
       sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDOUT]);
     }
     if(sh->stream.f[SHELL_STDERR] > 0) {
@@ -1048,7 +1171,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
  cmd  1>> OUT 2>> ERR < IN
  cmd  2> &1
 */
-static int exec1(C_SHELL *sh, int argc, char **argv)
+static int exec2(C_SHELL *sh, int argc, char **argv)
 {
   int i, i0, redirect, f;
   int argc_new;

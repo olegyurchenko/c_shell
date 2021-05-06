@@ -134,6 +134,7 @@ names = ("exit"
 , "[["
 , "set"
 , "read"
+, "tea"
 )
 
 comma = " "
