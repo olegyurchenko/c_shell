@@ -995,13 +995,37 @@ int sh_get_condition(C_SHELL *sh)
   return sh_current_context(sh)->condition ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
-static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, int argend)
+static int var_subst(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size, unsigned *size)
 {
-  int i, f = 0, r, ret = SHELL_OK, delta;
-  const char *end;
-  unsigned buffer_size = 16 * 1024;
-  char *buffer = NULL;
+  const char *value;
+ char *name;
 
+  *size = 0;
+
+  if(start <= end) {
+    return SHELL_OK;
+  }
+
+  name = (char *) cache_alloc(sh->cache, end - start + 1);
+  if(name == NULL) {
+    return SHELL_ERR_MALLOC;
+  }
+  memcpy(name, start, end - start);
+  name[end - start] = 0;
+  value = sh_get_var(sh, name);
+  cache_free(sh->cache, name);
+
+  while(*value && *size < buffer_size) {
+    buffer[*size] = *value;
+    (*size) ++;
+    value ++;
+  }
+  return SHELL_OK;
+}
+/*----------------------------------------------------------------------------*/
+static int cmmd_subs(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size, unsigned *size)
+{
+  int ret = SHELL_OK, f = 0, r, i;
   typedef struct {
     C_SHELL_PARSER parser;
 
@@ -1009,221 +1033,103 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
 
   command_substitution_t *data = NULL;
 
+  *size = 0;
+
   if(sh->stream.ext_handler == NULL) {
     return SHELL_ERR_NOT_IMPLEMENT;
   }
-
-  //Open output stream
-  f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, "", SHELL_FIFO);
-  if(f <= 0) {
-    return f < 0 ? f : SHELL_ERROR_OPEN_FILE;
+  data = (command_substitution_t *) cache_alloc(sh->cache, sizeof(command_substitution_t));
+  if(data == NULL) {
+    return SHELL_ERR_MALLOC;
   }
+  memset(data, 0, sizeof(command_substitution_t));
+
   do {
-    //Execute command
-    if((ret = exec1(sh, argc, argv, f)) != SHELL_OK) {
-      break;
-    }
-
-    data = (command_substitution_t *) cache_alloc(sh->cache, sizeof(command_substitution_t));
-    if(data == NULL) {
-      ret = SHELL_ERR_MALLOC;
-      break;
-    }
-    memset(data, 0, sizeof(command_substitution_t));
-    buffer = (char *) cache_alloc(sh->cache, buffer_size);
-    if(buffer == NULL) {
-      ret = SHELL_ERR_MALLOC;
-      break;
-    }
-
-    //Read command output
-    i = 0;
-     while (i < (int) (buffer_size - 1)) {
-      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[i], 1);
-      if(r < 0) {
-        ret = r;
-        break;
-      }
-
-      if(r == 0 || !buffer[i]) {
-        break;
-      }
-
-      if(buffer[i] == '\n' || buffer[i] == '\r') {
-        buffer[i] = ' ';
-      }
-
-      i ++;
-    }
-
-    if(SHELL_OK != ret) {
-      break;
-    }
-    buffer[i] = 0;
-    /*Optimize memory alloc*/
-    buffer = cache_realloc(sh->cache, buffer, i + 1);
-
-    //Parse string
     data->parser.arg0 = 0;
     data->parser.argc = 0;
+    sh->parser = &data->parser;
 
-    r = lexer(buffer, i, &end, data->parser.lex, MAX_LEXER_SIZE);
+    r = lexer(start, end-start, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
-      ret = r;
       break;
     }
 
+    if(r) {
+      if(data->parser.lex[r - 1].type == LEX_COMMENT)
+        r --;
+    }
 
     if(r) {
       data->parser.argc = r;
 
       r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
       if(r < 0) {
+        break;
+      }
+
+      if(sh_is_pars_debug_mode(sh)) {
+        args_print(sh, data->parser.argc, data->parser.argv);
+      }
+
+
+      //Open output stream
+      f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, "", SHELL_FIFO);
+      if(f <= 0) {
+        ret = f < 0 ? f : SHELL_ERROR_OPEN_FILE;
+        break;
+      }
+
+      r = exec1(sh, data->parser.argc, data->parser.argv, f);
+
+      for(i = 0; i < MAX_LEXER_SIZE; i++) {
+        if(data->parser.argv[i] != NULL) {
+          cache_free(sh->cache, data->parser.argv[i]);
+          data->parser.argv[i] = NULL;
+        }
+      }
+    }
+
+    if(SHELL_OK != ret) {
+      break;
+    }
+
+    //Read command output
+    while (*size < (buffer_size - 1)) {
+      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[*size], 1);
+      if(r < 0) {
         ret = r;
         break;
       }
-    }
-    //Parse string end
 
-    //argv substitution
-    for(i = arg0; i < argend; i++) {
-      cache_free(sh->cache, sh->parser->argv[i]);
-      sh->parser->argv[i] = NULL;
-    }
-
-    //argend = 8, arg0 = 3, newargc = 4 delta = -1
-    delta = data->parser.argc - argend + arg0;
-    for(i = argend; delta < 0 && i < sh->parser->argc; i++) {
-      sh->parser->argv[i + delta] = sh->parser->argv[i];
-      sh->parser->lex[i + delta] = sh->parser->lex[i];
-      sh->parser->argv[i] = NULL;
-    }
-
-    for(i = sh->parser->argc - 1; delta > 0 && i >= argend; i--) {
-      sh->parser->argv[i + delta] = sh->parser->argv[i];
-      sh->parser->lex[i + delta] = sh->parser->lex[i];
-      sh->parser->argv[i] = NULL;
-    }
-    sh->parser->argc += delta;
-    for(i = 0; i < data->parser.argc; i++) {
-      sh->parser->argv[i + arg0] = data->parser.argv[i];
-      sh->parser->lex[i + arg0] = data->parser.lex[i];
-    }
-    //argv substitution end
-
-    //Save buffer to argv[argc] - it will be released later
-    for(i = sh->parser->argc; i < MAX_LEXER_SIZE; i++) {
-      if(sh->parser->argv[i] == NULL) {
-        sh->parser->argv[i] = buffer;
+      if(r == 0 || !buffer[*size]) {
         break;
       }
+
+      if(buffer[*size] == '\n' || buffer[*size] == '\r') {
+        buffer[*size] = ' ';
+      }
+
+      (*size) ++;
     }
-    buffer = NULL;
+    buffer[*size] = 0;
+
+    if(SHELL_OK != ret) {
+      break;
+    }
+    //Read command output end
 
   } while(0);
 
   if(f > 0) {
     sh->stream.ext_handler->_close(sh->stream.ext_handler->data, f);
   }
-
-  if(data != NULL) {
-    cache_free(sh->cache, data);
-  }
-  if(buffer != NULL) {
-    cache_free(sh->cache, buffer);
-  }
+  cache_free(sh->cache, data);
   return ret;
 }
 /*----------------------------------------------------------------------------*/
-//Handle Command substitution
-/*
-$(cmd)
-`cmd`
-*/
 static int exec0(C_SHELL *sh, int argc, char **argv)
 {
-  int i, start, end, ret = SHELL_OK;
-
-  //$(cmd)
-  while (ret == SHELL_OK) {
-
-    start = end = -1;
-
-    //Find $(
-    for(i = 0; i < argc - 1; i++) {
-      if(sh->parser->lex[i].type == LEX_STR
-         && sh->parser->lex[i].end - sh->parser->lex[i].start == 1
-         && *sh->parser->lex[i].start == '$'
-         && sh->parser->lex[i+1].type == LEX_LPAREN) {
-        start = i;
-      }
-    }
-
-    if(start == -1) {
-      break;
-    }
-
-    for(i = start; i < argc; i++) {
-      if(sh->parser->lex[i].type == LEX_RPAREN) {
-        end = i;
-        break;
-      }
-    }
-
-    if(end == -1) {
-      //No closed )
-      break;
-    }
-
-    sh->parser->arg0 = start + 2;
-    if((ret = command_substitution(sh, end - start - 2, &argv[start + 2], start, end + 1)) < 0) {
-      break;
-    }
-    argc = sh->parser->argc;
-    sh->parser->arg0 = 0;
-  }
-
-  //`cmd` (backstick-et cmd
-  while (ret == SHELL_OK) {
-
-    start = end = -1;
-
-    //Find $(
-    for(i = 0; i < argc - 1; i++) {
-      if(sh->parser->lex[i].type == LEX_BACKTICK) {
-        start = i;
-        break;
-      }
-    }
-
-    if(start == -1) {
-      break;
-    }
-
-    for(i = start + 1; i < argc; i++) {
-      if(sh->parser->lex[i].type == LEX_BACKTICK) {
-        end = i;
-        break;
-      }
-    }
-
-    if(end == -1) {
-      //No closed `
-      break;
-    }
-
-    sh->parser->arg0 = start + 1;
-    if((ret = command_substitution(sh, end - start - 1, &argv[start + 1], start, end + 1)) < 0) {
-      break;
-    }
-    argc = sh->parser->argc;
-    sh->parser->arg0 = 0;
-  }
-
-  if(ret == SHELL_OK) {
-    ret = exec1(sh, argc, argv, 0);
-  }
-  return ret;
+  return exec1(sh, argc, argv, 0);
 }
 /*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/
@@ -1642,66 +1548,13 @@ static char otoc(const char **src)
   return (char) c;
 }
 /*----------------------------------------------------------------------------*/
-static unsigned var_substitution(C_SHELL *sh, const char *begin, const char *end, char *buffer, unsigned buffer_size)
-{
-  char *name = NULL;
-  const char *value;
-  unsigned size, i;
-  if(*begin == '{') {
-    begin ++;
-  }
-
-  //if(*end == '}') {
-  //  end --;
-  //}
-
-  if(end <= begin)
-    return 0;
-
-  size = end - begin;
-  name = cache_alloc(sh->cache, size + 1);
-  if(name == NULL)
-    return 0;
-  memcpy(name, begin, size);
-  name[size] = 0;
-  value = shell_get_var(sh, name);
-  cache_free(sh->cache, name);
-
-  size = strlen(value);
-  for(i = 0; i < size && i < buffer_size; i++) {
-    buffer[i] = value[i];
-  }
-  return i;
-}
-/*----------------------------------------------------------------------------*/
-static unsigned substitutions(C_SHELL *sh, const char **src, unsigned size, char *buffer, unsigned buffer_size)
-{
-  static const char delimiters[] = "}$/\\ \t+*-=><!$&()";
-  const char *p;
-  unsigned i, dst_index = 0;
-  p = *src;
-
-  for(i = 0; i < size; i++) {
-    if(strchr(delimiters, p[i]) != NULL) {
-      dst_index = var_substitution(sh, *src, &p[i], buffer, buffer_size);
-      break;
-    }
-  }
-
-  if(i >= size) {
-    dst_index = var_substitution(sh, *src, &p[size], buffer, buffer_size);
-  }
-
-  *src = &p[i];
-  return dst_index;
-}
-/*----------------------------------------------------------------------------*/
 static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size)
 {
   const char *p, *end;
   unsigned i;
   int use_vars = 1;
 
+  (void) sh;
   p = src->start;
   end = src->end;
   if(src->type == LEX_STR) {
@@ -1758,11 +1611,6 @@ static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, u
       continue;
     }
 
-    if(*p == '$' && use_vars) {
-      p ++;
-      i += substitutions(sh, &p, end - p, &buffer[i], buffer_size - i);
-      continue;
-    }
     buffer[i ++] = *p;
   }
 
@@ -1771,7 +1619,6 @@ static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, u
     i = buffer_size - 1;
   buffer[i] = 0;
   return i;
-
 }
 /*----------------------------------------------------------------------------*/
 static int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
