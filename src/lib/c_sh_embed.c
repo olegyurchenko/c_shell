@@ -69,6 +69,7 @@ static int sh_and(C_SHELL *sh, int argc, char **argv);
 static int sh_or(C_SHELL *sh, int argc, char **argv);
 static int sh_read(C_SHELL *sh, int argc, char **argv);
 static int sh_tea(C_SHELL *sh, int argc, char **argv);
+static int sh_seq(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 typedef struct {
   unsigned hash;
@@ -102,6 +103,7 @@ static const STD_FN std_fn[] = {
   , {0x00597abd, "||", sh_or}
   , {0x7c9d4d41, "read", sh_read}
   , {0x0b88adbf, "tea", sh_tea}
+  , {0x0b88a98e, "seq", sh_seq}
 };
 /*----------------------------------------------------------------------------
 """
@@ -788,6 +790,50 @@ static int sh_tea(C_SHELL *sh, int argc, char **argv)
   return ret;
 }
 /*----------------------------------------------------------------------------*/
+static int sh_seq(C_SHELL *sh, int argc, char **argv)
+{
+  int ret = SHELL_OK, r;
+  //All numbers can be integers, not reals.
+  int i, first = 1, step = 1, last, count = 0;
+  int values[3];
+
+  for(i = 1; i < argc; i++) {
+    if(count < 3) {
+      values[count ++] = atoi(argv[i]);
+    }
+  }
+
+  switch (count) {
+    case 1:
+      last = values[0];
+      break;
+    case 2:
+      first = values[0];
+      last = values[1];
+      break;
+    case 3:
+      first = values[0];
+      step = values[1];
+      last = values[2];
+      break;
+    default:
+      shell_fprintf(sh, SHELL_STDERR, "Invalid argument count\n");
+      return 1;
+  }
+
+  if( (first < last && step > 0)
+      || (first > last && step < 0)) {
+    for(i = first; i <= last; i += step) {
+      if((r = shell_printf(sh, "%d\n", i)) <= 0) {
+        ret = r;
+        break;
+      }
+    }
+  }
+
+  return ret;
+}
+/*----------------------------------------------------------------------------*/
 int sh_stream_open(void *data, const char* name, SHELL_STREAM_MODE mode)
 {
   int fd = 1;
@@ -795,11 +841,12 @@ int sh_stream_open(void *data, const char* name, SHELL_STREAM_MODE mode)
   C_SHELL_INTERN_STREAM *stream;
   unsigned h = 0;
 
+  sh = (C_SHELL *) data;
+
   if(mode != SHELL_FIFO) {
     h = sh_hash(name);
   }
 
-  sh = (C_SHELL *) data;
   stream = sh->intern_stream;
   while (stream != NULL) {
     if(fd <= stream->fd) {

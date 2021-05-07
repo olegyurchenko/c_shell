@@ -29,6 +29,7 @@ names = ("exit"
 , "set"
 , "read"
 , "tea"
+, "seq"
 )
 
 comma = " "
