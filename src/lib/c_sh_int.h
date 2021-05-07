@@ -41,6 +41,7 @@ typedef enum {
   , LEX_RDSQB //]
   , LEX_LPAREN //(
   , LEX_RPAREN //)
+  , LEX_BACKTICK //`
   , LEX_STR //string
   , LEX_COMMENT //#comm
 } LEX_CODES;

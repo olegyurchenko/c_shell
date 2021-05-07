@@ -902,6 +902,20 @@ static int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst
       continue;
     } //(
 
+    if(src[i] == '`') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_BACKTICK;
+      dst[count].start = &src[i];
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //(
+
     if(!arg_size) {
       dst[count].type = LEX_STR;
       dst[count].start = &src[i];
@@ -1024,15 +1038,21 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
 
     //Read command output
     i = 0;
-     while (i < (int) buffer_size) {
+     while (i < (int) (buffer_size - 1)) {
       r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[i], 1);
       if(r < 0) {
         ret = r;
         break;
       }
-      if(r == 0 || !buffer[i] || buffer[i] == '\n') {
+
+      if(r == 0 || !buffer[i]) {
         break;
       }
+
+      if(buffer[i] == '\n' || buffer[i] == '\r') {
+        buffer[i] = ' ';
+      }
+
       i ++;
     }
 
@@ -1122,6 +1142,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
 {
   int i, start, end, ret = SHELL_OK;
 
+  //$(cmd)
   while (1) {
 
     start = end = -1;
@@ -1154,6 +1175,43 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
 
     sh->parser->arg0 = start + 2;
     if((ret = command_substitution(sh, end - start - 2, &argv[start + 2], start, end + 1)) < 0) {
+      break;
+    }
+    argc = sh->parser->argc;
+    sh->parser->arg0 = 0;
+  }
+
+  //`cmd` (backstick-et cmd
+  while (1) {
+
+    start = end = -1;
+
+    //Find $(
+    for(i = 0; i < argc - 1; i++) {
+      if(sh->parser->lex[i].type == LEX_BACKTICK) {
+        start = i;
+        break;
+      }
+    }
+
+    if(start == -1) {
+      break;
+    }
+
+    for(i = start + 1; i < argc; i++) {
+      if(sh->parser->lex[i].type == LEX_BACKTICK) {
+        end = i;
+        break;
+      }
+    }
+
+    if(end == -1) {
+      //No closed `
+      break;
+    }
+
+    sh->parser->arg0 = start + 1;
+    if((ret = command_substitution(sh, end - start - 1, &argv[start + 1], start, end + 1)) < 0) {
       break;
     }
     argc = sh->parser->argc;
@@ -1502,6 +1560,7 @@ static const char *lex_name(LEX_CODES l)
     case LEX_RDSQB:     return "RDSQB";
     case LEX_LPAREN:    return "LPAREN";
     case LEX_RPAREN:    return "RPAREN";
+    case LEX_BACKTICK:    return "BACKTICK";
     case LEX_STR:      return "STR";
     case LEX_COMMENT:   return "COMMENT";
   }
