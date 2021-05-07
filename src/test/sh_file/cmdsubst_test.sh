@@ -14,7 +14,7 @@ if [ "$x" == "22222222222222" ] ; then echo Ok ; else echo Failed ; fi
 
 x=''
 for i in `seq 5`;do
-x=${x}`echo $i`
+x=${x}$i
 done
 
  echo -n "Test4 "
