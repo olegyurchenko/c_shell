@@ -13,6 +13,8 @@
 */
 /*----------------------------------------------------------------------------*/
 #include "c_sh.h"
+#include "c_sh_int.h"
+#include "c_sh_embed.h"
 /*----------------------------------------------------------------------------*/
 #undef STDLIB
 #if !defined(NOSTDLIB)
@@ -37,24 +39,9 @@
 #define FREE free
 #endif
 /*----------------------------------------------------------------------------*/
-#ifdef STDLIB
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <ctype.h>
-#else //STDLIB
-#endif //STDLIB
-/*----------------------------------------------------------------------------*/
 #include "c_cache.h"
 #include "loop_buff.h"
 #include "nprintf.h"
-/*----------------------------------------------------------------------------*/
-#ifndef MALLOC
-#define MALLOC malloc
-#endif
-#ifndef FREE
-#define FREE free
-#endif
 /*----------------------------------------------------------------------------*/
 //#define USE_SH_TEST //Use external test function
 #ifdef USE_SH_TEST
@@ -63,125 +50,6 @@
 /*----------------------------------------------------------------------------*/
 #define DEBUG_MOODE
 /*----------------------------------------------------------------------------*/
-#define VAR_NAME_LENGTH 16
-#define MAX_LEXER_SIZE 256
-#define DEFAULT_CACHE_SIZE 64*1024
-#define BUFFER_SIZE 1024
-/*----------------------------------------------------------------------------*/
-typedef enum {
-  LEX_ASSIGN //'='
-  , LEX_NOT //!
-  , LEX_AMP //&
-  , LEX_VERBAR //|
-  , LEX_AND //&&
-  , LEX_OR //||
-  , LEX_EQ  // ==
-  , LEX_NE  // !=
-  , LEX_GT  //>
-  , LEX_GE  //>=
-  , LEX_LT  //<
-  , LEX_LE  //<=
-  , LEX_LSQB //[
-  , LEX_LDSQB //[[
-  , LEX_RSQB //]
-  , LEX_RDSQB //]
-  , LEX_LPAREN //(
-  , LEX_RPAREN //)
-  , LEX_STR //string
-  , LEX_COMMENT //#comm
-} LEX_CODES;
-/*----------------------------------------------------------------------------*/
-typedef enum {
-  OP_UNKNOWN = 0,
-  OP_IF,
-  OP_FOR,
-  OP_WHILE,
-  OP_UNTIL
-} OP_CODE;
-/*----------------------------------------------------------------------------*/
-struct C_SHELL_VAR_TAG {
-  struct C_SHELL_VAR_TAG *next;
-  unsigned hash;
-  char name[VAR_NAME_LENGTH];
-  char value[1];
-};
-typedef struct C_SHELL_VAR_TAG C_SHEL_VAR;
-/*----------------------------------------------------------------------------*/
-typedef struct {
-  const char *start;
-  const char *end;
-  int type;
-  int reserved; //Alignmemnt
-} LEX_ELEM;
-/*----------------------------------------------------------------------------*/
-struct C_SHELL_PARSER_TAG {
-  LEX_ELEM lex[MAX_LEXER_SIZE];
-  char *argv[MAX_LEXER_SIZE];
-  int argc;
-  int arg0; //Start argument (may be > 0)
-  //int reserved; //Alignmemnt
-};
-typedef struct C_SHELL_PARSER_TAG C_SHELL_PARSER;
-/*----------------------------------------------------------------------------*/
-struct C_SHELL_LINE_CACHE_TAG {
-  int op_id;
-  struct C_SHELL_LINE_CACHE_TAG *next;
-  char text[1];
-};
-typedef struct C_SHELL_LINE_CACHE_TAG C_SHELL_LINE_CACHE;
-/*----------------------------------------------------------------------------*/
-struct C_SHELL_CONTEXT_TAG {
-  struct C_SHELL_CONTEXT_TAG *child;
-  struct C_SHELL_CONTEXT_TAG *parent;
-  struct {
-    C_SHELL_LINE_CACHE *first;
-    C_SHELL_LINE_CACHE *last;
-    C_SHELL_LINE_CACHE *root;
-  } cache;
-  int op_id;
-  OP_CODE op_code;
-  int for_index;
-  int condition:1;
-  int should_store_cache:1;
-  int is_loop:1;
-  int is_continue:1;
-};
-typedef struct C_SHELL_CONTEXT_TAG C_SHELL_CONTEXT;
-/*----------------------------------------------------------------------------*/
-struct C_SHELL_TAG {
-  struct {
-    SHELL_PRINT_CB cb;
-    void *arg;
-  } print_cb;
-
-  struct  {
-    SHELL_EXEC_CB cb;
-    void *arg;
-  } exec_cb;
-
-  struct  {
-    SHELL_STEP_CB cb;
-    void *arg;
-  } step_cb;
-
-  struct {
-    SHELL_STREAM_HANDLER *ext_handler;
-    int f[3]; /*File h f[0] - stdin, f[1] - stdout, f[2] - stderr*/
-  } stream;
-
-  C_CACHE *cache;
-  C_SHELL_CONTEXT context;
-  C_SHELL_PARSER *parser;
-  C_SHEL_VAR *vars;
-
-  int op_id;
-  int cache_stack;
-  int cache_mode:1;
-  int terminate:1;
-};
-/*----------------------------------------------------------------------------*/
-static unsigned calc_hash(const char *str);
-/*----------------------------------------------------------------------------*/
 static int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
 static void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size);
 static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size);
@@ -189,135 +57,14 @@ static int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv
 static void args_print(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 static int context_stack(C_SHELL *sh);
-static int push_context(C_SHELL *sh);
-static int pop_context(C_SHELL *sh);
-static C_SHELL_CONTEXT *root_context(C_SHELL *sh);
-static C_SHELL_CONTEXT *current_context(C_SHELL *sh);
-static int set_var(C_SHELL *sh, const char *name, const char *value);
-static const char *get_var(C_SHELL *sh, const char *name);
 static void clear_vars(C_SHELL *sh);
 static int add_src_to_cache(C_SHELL *sh, const char *src, unsigned size);
 static void set_context_should_store_cache(C_SHELL *sh, int should_store);
-static int play_cache(C_SHELL *sh);
-static int remove_cache(C_SHELL *sh);
-static void set_cache_mode(C_SHELL *sh, int mode);
-static int is_cache_mode(C_SHELL *sh);
-static void set_opcode(C_SHELL *sh, OP_CODE c);
-static OP_CODE current_opcode(C_SHELL *sh);
-/*----------------------------------------------------------------------------*/
-#define TRUE_CONDITION 0
-#define NOT_TRUE_CONDITION 1
-
-static void set_condition(C_SHELL *sh, int c);
-static void set_true_condition(C_SHELL *sh) {set_condition(sh, TRUE_CONDITION);}
-static void set_false_condition(C_SHELL *sh) {set_condition(sh, NOT_TRUE_CONDITION);}
-static int get_condition(C_SHELL *sh);
-static int is_true_condition(C_SHELL *sh);
-/*----------------------------------------------------------------------------*/
-static int is_debug_mode(C_SHELL *sh);
-static int is_lex_debug_mode(C_SHELL *sh);
-static int is_pars_debug_mode(C_SHELL *sh);
-static int is_cache_debug_mode(C_SHELL *sh);
 /*----------------------------------------------------------------------------*/
 static int exec0(C_SHELL *sh, int argc, char **argv);
-static int exec1(C_SHELL *sh, int argc, char **argv);
-static int exec3(C_SHELL *sh, int argc, char **argv);
-static int embed_exec(C_SHELL *sh, int argc, char **argv);
-/**Embeded functions*/
-static int _eXit(C_SHELL *sh, int argc, char **argv);
-static int _break(C_SHELL *sh, int argc, char **argv);
-static int _continue(C_SHELL *sh, int argc, char **argv);
-static int _if(C_SHELL *sh, int argc, char **argv);
-static int _then(C_SHELL *sh, int argc, char **argv);
-static int _fi(C_SHELL *sh, int argc, char **argv);
-static int _else(C_SHELL *sh, int argc, char **argv);
-static int _elif(C_SHELL *sh, int argc, char **argv);
-static int _true(C_SHELL *sh, int argc, char **argv);
-static int _false(C_SHELL *sh, int argc, char **argv);
-static int _while(C_SHELL *sh, int argc, char **argv);
-static int _until(C_SHELL *sh, int argc, char **argv);
-static int _for(C_SHELL *sh, int argc, char **argv);
-static int _do(C_SHELL *sh, int argc, char **argv);
-static int _done(C_SHELL *sh, int argc, char **argv);
-static int _echo(C_SHELL *sh, int argc, char **argv);
-static int _test(C_SHELL *sh, int argc, char **argv);
-static int _set(C_SHELL *sh, int argc, char **argv);
-static int _assign(C_SHELL *sh, int argc, char **argv);
-static int _and(C_SHELL *sh, int argc, char **argv);
-static int _or(C_SHELL *sh, int argc, char **argv);
+static int exec1(C_SHELL *sh, int argc, char **argv, int stdout);
+static int exec2(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
-#ifndef USE_SH_TEST
-static int intern_test(C_SHELL *sh, int argc, char **argv);
-#endif //USE_SH_TEST
-/*----------------------------------------------------------------------------*/
-typedef struct {
-  unsigned hash;
-  const char *name;
-  int (*handler)(C_SHELL *,int,char**);
-
-} STD_FN;
-
-static const STD_FN std_fn[] = {
-    {0x7c967e3f, "exit", _eXit}
-  , {0x0f2c9f4a, "break", _break}
-  , {0x42aefb8a, "continue", _continue}
-  , {0x00597834, "if", _if}
-  , {0x7c9e7354, "then", _then}
-  , {0x005977d4, "fi", _fi}
-  , {0x7c964c6e, "else", _else}
-  , {0x7c964b25, "elif", _elif}
-  , {0x7c9e9fe5, "true", _true}
-  , {0x0f6bcef0, "false", _false}
-  , {0x10a3387e, "while", _while}
-  , {0x10828031, "until", _until}
-  , {0x0b88738c, "for", _for}
-  , {0x00597798, "do", _do}
-  , {0x7c95cc2b, "done", _done}
-  , {0x7c9624c4, "echo", _echo}
-  , {0x7c9e6865, "test", _test}
-  , {0x0002b600, "[", _test}
-  , {0x0059765b, "[[", _test}
-  , {0x0b88a991, "set", _set}
-  , {0x00596f51, "&&", _and}
-  , {0x00597abd, "||", _or}
-};
-/*----------------------------------------------------------------------------
-"""
-Python script to compute hashes
-"""
-def hash(str):
-  h = 5381
-  for c in str:
-    h = (h * 33 + ord(c)) & 0xffffffff
-  return h
-
-names = ("exit"
-, "break"
-, "continue"
-, "if"
-, "then"
-, "fi"
-, "else"
-, "elif"
-, "true"
-, "false"
-, "while"
-, "until"
-, "for"
-, "do"
-, "done"
-, "echo"
-, "test"
-, "["
-, "[["
-, "set")
-
-comma = " "
-print()
-for name in names:
-  print( '{0} {{ 0x{1:08x}, "{2}", _{3} }}'.format(comma, hash(name), name, name))
-  comma=','
-----------------------------------------------------------------------------*/
 const char *shell_err_string(C_SHELL *sh, int err)
 {
   const char *str = "Unknown error";
@@ -379,19 +126,52 @@ C_SHELL *shell_alloc()
     FREE(sh);
     return NULL;
   }
+  //Intern stream handler;
+  sh->stream.ext_handler = cache_alloc(sh->cache, sizeof(SHELL_STREAM_HANDLER));
+  if(sh->stream.ext_handler != NULL) {
+    sh->stream.ext_handler->data = sh;
+    sh->stream.ext_handler->_open = sh_stream_open;
+    sh->stream.ext_handler->_close = sh_stream_close;
+    sh->stream.ext_handler->_read = sh_stream_read;
+    sh->stream.ext_handler->_write = sh_stream_write;
+  }
 
   return sh;
 }
 /*----------------------------------------------------------------------------*/
 void shell_reset(C_SHELL *sh)
 {
+  C_SHELL_INTERN_STREAM *s;
   while(context_stack(sh)) {
-    pop_context(sh);
+    sh_pop_context(sh);
   }
-  set_cache_mode(sh, 0);
+  sh_set_cache_mode(sh, 0);
   set_context_should_store_cache(sh, 0);
-  remove_cache(sh);
+  sh_remove_cache(sh);
   clear_vars(sh);
+  if(sh->stream.ext_handler != NULL) {
+    if(sh->stream.f[SHELL_STDIN] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
+    }
+    if(sh->stream.f[SHELL_STDOUT] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDOUT]);
+    }
+    if(sh->stream.f[SHELL_STDERR] > 0) {
+      sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDERR]);
+    }
+  }
+  sh->stream.f[SHELL_STDIN] = 0;
+  sh->stream.f[SHELL_STDOUT] = 0;
+  sh->stream.f[SHELL_STDERR] = 0;
+
+  while(sh->intern_stream != NULL) {
+    s = sh->intern_stream;
+    sh->intern_stream = s->next;
+    if(s->buffer != NULL) {
+      cache_free(sh->cache, s->buffer);
+    }
+    cache_free(sh->cache, s);
+  }
 }
 /*----------------------------------------------------------------------------*/
 void shell_free(C_SHELL *sh)
@@ -576,22 +356,22 @@ int shell_vprintf(C_SHELL *sh, const char *format, va_list ap)
   return vnprintf(shell_writer, &arg, format, ap);
 }
 /*----------------------------------------------------------------------------*/
-static C_SHELL_CONTEXT *root_context(C_SHELL *sh)
+C_SHELL_CONTEXT *sh_root_context(C_SHELL *sh)
 {
   return &sh->context;
 }
 /*----------------------------------------------------------------------------*/
-static C_SHELL_CONTEXT *current_context(C_SHELL *sh)
+C_SHELL_CONTEXT *sh_current_context(C_SHELL *sh)
 {
   C_SHELL_CONTEXT *c;
-  c = root_context(sh);
+  c = sh_root_context(sh);
   while(c->child != NULL) {
     c = c->child;
   }
   return c;
 }
 /*----------------------------------------------------------------------------*/
-static C_SHEL_VAR *find_var(C_SHELL *sh, unsigned hash, C_SHEL_VAR **prior /*=NULL*/)
+C_SHEL_VAR *sh_find_var(C_SHELL *sh, unsigned hash, C_SHEL_VAR **prior /*=NULL*/)
 {
   C_SHEL_VAR *n;
   if(prior != NULL)
@@ -610,7 +390,7 @@ static C_SHEL_VAR *find_var(C_SHELL *sh, unsigned hash, C_SHEL_VAR **prior /*=NU
   return n;
 }
 /*----------------------------------------------------------------------------*/
-static int set_var(C_SHELL *sh, const char *name, const char *value)
+int sh_set_var(C_SHELL *sh, const char *name, const char *value)
 {
   C_SHEL_VAR *prev, *n, *r;
   unsigned size = 0, hash;
@@ -619,8 +399,8 @@ static int set_var(C_SHELL *sh, const char *name, const char *value)
     size = strlen(value);
   }
 
-  hash = calc_hash(name);
-  n = find_var(sh, hash, &prev);
+  hash = sh_hash(name);
+  n = sh_find_var(sh, hash, &prev);
   if(!size) {
     //Remove var
     if(n != NULL) {
@@ -683,14 +463,14 @@ static int set_var(C_SHELL *sh, const char *name, const char *value)
   return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
-static const char *get_var(C_SHELL *sh, const char *name)
+const char *sh_get_var(C_SHELL *sh, const char *name)
 {
   static const char empy = 0;
   C_SHEL_VAR *v;
   unsigned hash;
 
-  hash = calc_hash(name);
-  v = find_var(sh, hash, NULL);
+  hash = sh_hash(name);
+  v = sh_find_var(sh, hash, NULL);
   if(v == NULL) {
     return &empy;
   }
@@ -712,11 +492,11 @@ static void clear_vars(C_SHELL *sh)
 /*----------------------------------------------------------------------------*/
 int shell_set_var(C_SHELL *sh, const char *name, const char *value)
 {
-  if(is_debug_mode(sh)) {
+  if(sh_is_debug_mode(sh)) {
     shell_fprintf(sh, SHELL_STDERR, "set '%s' = '%s'\n", name, (value == NULL || !*value) ? "NULL" : value);
   }
 
-  return set_var(sh, name, value);
+  return sh_set_var(sh, name, value);
 }
 /*----------------------------------------------------------------------------*/
 int shell_set_int_var(C_SHELL *sh, const char *name, int value)
@@ -728,7 +508,7 @@ int shell_set_int_var(C_SHELL *sh, const char *name, int value)
 /*----------------------------------------------------------------------------*/
 const char *shell_get_var(C_SHELL *sh, const char *name)
 {
-  return get_var(sh, name);
+  return sh_get_var(sh, name);
 }
 /*----------------------------------------------------------------------------*/
 int shell_get_int_var(C_SHELL *sh, const char *name, int *value)
@@ -749,58 +529,71 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
   int i, r = SHELL_OK;
   const char *end;
   unsigned size;
-  C_SHELL_PARSER *parser = NULL;
 
-  parser = (C_SHELL_PARSER *) cache_alloc(sh->cache, sizeof(C_SHELL_PARSER));
-  if(parser == NULL) {
+  typedef struct {
+    C_SHELL_PARSER parser;
+    const char *start;
+    const char *end;
+    char source[1];
+  } exec_str_t;
+
+  exec_str_t *data;
+
+  size = strlen(str);
+  data = (exec_str_t *) cache_alloc(sh->cache, sizeof(exec_str_t) + size);
+  if(data == NULL) {
     return SHELL_ERR_MALLOC;
   }
-  memset(parser, 0, sizeof(C_SHELL_PARSER));
+  memset(data, 0, sizeof(exec_str_t) + size);
+  memcpy(data->source, str, size);
+  str = data->source;
 
   while(1) {
     end = NULL;
     size = strlen(str);
-    for(i = 0; i < MAX_LEXER_SIZE; i++) {
-      parser->argv[i] = NULL;
-    }
-    parser->arg0 = 0;
-    parser->argc = 0;
-    sh->parser = parser;
+    data->parser.arg0 = 0;
+    data->parser.argc = 0;
+    sh->parser = &data->parser;
 
-    r = lexer(str, size, &end, parser->lex, MAX_LEXER_SIZE);
+    r = lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
       break;
     }
 
     if(r) {
-      if(parser->lex[r - 1].type == LEX_COMMENT)
+      if(data->parser.lex[r - 1].type == LEX_COMMENT)
         r --;
     }
 
     if(r) {
-      parser->argc = r;
-      if(is_lex_debug_mode(sh)) {
-        lex_print(sh, parser->lex, parser->argc);
+      data->parser.argc = r;
+      data->start = data->parser.lex[0].start,
+      data->end = data->parser.lex[data->parser.argc - 1].end;
+
+      if(sh_is_lex_debug_mode(sh)) {
+        lex_print(sh, data->parser.lex, data->parser.argc);
       }
 
-      r = args_prepare(sh, parser->lex, parser->argc, parser->argv);
+      r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
       if(r < 0) {
         break;
       }
 
-      if(is_pars_debug_mode(sh)) {
-        args_print(sh, parser->argc, parser->argv);
+      if(sh_is_pars_debug_mode(sh)) {
+        args_print(sh, data->parser.argc, data->parser.argv);
       }
 
       if(!from_cache) {
         sh->op_id ++;
       }
 
-      r = exec0(sh, parser->argc, parser->argv);
+      r = exec0(sh, data->parser.argc, data->parser.argv);
 
-      for(i = 0; i < parser->argc; i++) {
-        cache_free(sh->cache, parser->argv[i]);
-        parser->argv[i] = NULL;
+      for(i = 0; i < MAX_LEXER_SIZE; i++) {
+        if(data->parser.argv[i] != NULL) {
+          cache_free(sh->cache, data->parser.argv[i]);
+          data->parser.argv[i] = NULL;
+        }
       }
 
       if(r < 0) {
@@ -808,13 +601,8 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
       }
 
 
-      if(parser->argc > 0 //Check: argc may be changed by exec
-         && !from_cache
-         ) {
-        r = add_src_to_cache(sh,
-                             parser->lex[0].start,
-            parser->lex[parser->argc - 1].end - parser->lex[0].start
-            );
+      if(!from_cache) {
+        r = add_src_to_cache(sh, data->start, data->end - data->start);
         if(r < 0) {
           break;
         }
@@ -828,7 +616,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     break;
   }
 
-  cache_free(sh->cache, parser);
+  cache_free(sh->cache, data);
   sh->parser = NULL;
   return r;
 }
@@ -848,7 +636,7 @@ void shell_terminate(C_SHELL *sh)
   sh->terminate = 1;
 }
 /*----------------------------------------------------------------------------*/
-static unsigned calc_hash(const char *str)
+unsigned sh_hash(const char *str)
 {
   unsigned h = 5381;
   int c;
@@ -1114,6 +902,20 @@ static int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst
       continue;
     } //(
 
+    if(src[i] == '`') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_BACKTICK;
+      dst[count].start = &src[i];
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //(
+
     if(!arg_size) {
       dst[count].type = LEX_STR;
       dst[count].start = &src[i];
@@ -1132,7 +934,7 @@ static int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst
   return count;
 }
 /*----------------------------------------------------------------------------*/
-static int is_debug_mode(C_SHELL *sh)
+int sh_is_debug_mode(C_SHELL *sh)
 {
 #ifdef DEBUG_MOODE
   return atoi(shell_get_var(sh, SHELL_DEBUG_VAR_NAME));
@@ -1141,7 +943,7 @@ static int is_debug_mode(C_SHELL *sh)
 #endif
 }
 /*----------------------------------------------------------------------------*/
-static int is_lex_debug_mode(C_SHELL *sh)
+int sh_is_lex_debug_mode(C_SHELL *sh)
 {
 #ifdef DEBUG_MOODE
   return atoi(shell_get_var(sh, LEX_DEBUG_VAR_NAME));
@@ -1150,7 +952,7 @@ static int is_lex_debug_mode(C_SHELL *sh)
 #endif
 }
 /*----------------------------------------------------------------------------*/
-static int is_pars_debug_mode(C_SHELL *sh)
+int sh_is_pars_debug_mode(C_SHELL *sh)
 {
 #ifdef DEBUG_MOODE
   return atoi(shell_get_var(sh, PARS_DEBUG_VAR_NAME));
@@ -1159,7 +961,7 @@ static int is_pars_debug_mode(C_SHELL *sh)
 #endif
 }
 /*----------------------------------------------------------------------------*/
-static int is_cache_debug_mode(C_SHELL *sh)
+int sh_is_cache_debug_mode(C_SHELL *sh)
 {
 #ifdef DEBUG_MOODE
   return atoi(shell_get_var(sh, CACHE_DEBUG_VAR_NAME));
@@ -1168,19 +970,260 @@ static int is_cache_debug_mode(C_SHELL *sh)
 #endif
 }
 /*----------------------------------------------------------------------------*/
-static int is_true_condition(C_SHELL *sh)
+int sh_is_true_condition(C_SHELL *sh)
 {
-  return !current_context(sh)->condition;
+  return !sh_current_context(sh)->condition;
 }
 /*----------------------------------------------------------------------------*/
-static void set_condition(C_SHELL *sh, int c)
+void sh_set_condition(C_SHELL *sh, int c)
 {
-  current_context(sh)->condition = c ? 1 : 0;
+  sh_current_context(sh)->condition = c ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
-static int get_condition(C_SHELL *sh)
+void sh_set_true_condition(C_SHELL *sh)
 {
-  return current_context(sh)->condition ? 1 : 0;
+  sh_set_condition(sh, TRUE_CONDITION);
+}
+/*----------------------------------------------------------------------------*/
+void sh_set_false_condition(C_SHELL *sh)
+{
+  sh_set_condition(sh, NOT_TRUE_CONDITION);
+}
+/*----------------------------------------------------------------------------*/
+int sh_get_condition(C_SHELL *sh)
+{
+  return sh_current_context(sh)->condition ? 1 : 0;
+}
+/*----------------------------------------------------------------------------*/
+static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, int argend)
+{
+  int i, f = 0, r, ret = SHELL_OK, delta;
+  const char *end;
+  unsigned buffer_size = 16 * 1024;
+  char *buffer = NULL;
+
+  typedef struct {
+    C_SHELL_PARSER parser;
+
+  } command_substitution_t;
+
+  command_substitution_t *data = NULL;
+
+  if(sh->stream.ext_handler == NULL) {
+    return SHELL_ERR_NOT_IMPLEMENT;
+  }
+
+  //Open output stream
+  f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, "", SHELL_FIFO);
+  if(f <= 0) {
+    return f < 0 ? f : SHELL_ERROR_OPEN_FILE;
+  }
+  do {
+    //Execute command
+    if((ret = exec1(sh, argc, argv, f)) != SHELL_OK) {
+      break;
+    }
+
+    data = (command_substitution_t *) cache_alloc(sh->cache, sizeof(command_substitution_t));
+    if(data == NULL) {
+      ret = SHELL_ERR_MALLOC;
+      break;
+    }
+    memset(data, 0, sizeof(command_substitution_t));
+    buffer = (char *) cache_alloc(sh->cache, buffer_size);
+    if(buffer == NULL) {
+      ret = SHELL_ERR_MALLOC;
+      break;
+    }
+
+    //Read command output
+    i = 0;
+     while (i < (int) (buffer_size - 1)) {
+      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[i], 1);
+      if(r < 0) {
+        ret = r;
+        break;
+      }
+
+      if(r == 0 || !buffer[i]) {
+        break;
+      }
+
+      if(buffer[i] == '\n' || buffer[i] == '\r') {
+        buffer[i] = ' ';
+      }
+
+      i ++;
+    }
+
+    if(SHELL_OK != ret) {
+      break;
+    }
+    buffer[i] = 0;
+    /*Optimize memory alloc*/
+    buffer = cache_realloc(sh->cache, buffer, i + 1);
+
+    //Parse string
+    data->parser.arg0 = 0;
+    data->parser.argc = 0;
+
+    r = lexer(buffer, i, &end, data->parser.lex, MAX_LEXER_SIZE);
+    if(r < 0) {
+      ret = r;
+      break;
+    }
+
+
+    if(r) {
+      data->parser.argc = r;
+
+      r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
+      if(r < 0) {
+        ret = r;
+        break;
+      }
+    }
+    //Parse string end
+
+    //argv substitution
+    for(i = arg0; i < argend; i++) {
+      cache_free(sh->cache, sh->parser->argv[i]);
+      sh->parser->argv[i] = NULL;
+    }
+
+    //argend = 8, arg0 = 3, newargc = 4 delta = -1
+    delta = data->parser.argc - argend + arg0;
+    for(i = argend; delta < 0 && i < sh->parser->argc; i++) {
+      sh->parser->argv[i + delta] = sh->parser->argv[i];
+      sh->parser->lex[i + delta] = sh->parser->lex[i];
+      sh->parser->argv[i] = NULL;
+    }
+
+    for(i = sh->parser->argc - 1; delta > 0 && i >= argend; i--) {
+      sh->parser->argv[i + delta] = sh->parser->argv[i];
+      sh->parser->lex[i + delta] = sh->parser->lex[i];
+      sh->parser->argv[i] = NULL;
+    }
+    sh->parser->argc += delta;
+    for(i = 0; i < data->parser.argc; i++) {
+      sh->parser->argv[i + arg0] = data->parser.argv[i];
+      sh->parser->lex[i + arg0] = data->parser.lex[i];
+    }
+    //argv substitution end
+
+    //Save buffer to argv[argc] - it will be released later
+    for(i = sh->parser->argc; i < MAX_LEXER_SIZE; i++) {
+      if(sh->parser->argv[i] == NULL) {
+        sh->parser->argv[i] = buffer;
+        break;
+      }
+    }
+    buffer = NULL;
+
+  } while(0);
+
+  if(f > 0) {
+    sh->stream.ext_handler->_close(sh->stream.ext_handler->data, f);
+  }
+
+  if(data != NULL) {
+    cache_free(sh->cache, data);
+  }
+  if(buffer != NULL) {
+    cache_free(sh->cache, buffer);
+  }
+  return ret;
+}
+/*----------------------------------------------------------------------------*/
+//Handle Command substitution
+/*
+$(cmd)
+`cmd`
+*/
+static int exec0(C_SHELL *sh, int argc, char **argv)
+{
+  int i, start, end, ret = SHELL_OK;
+
+  //$(cmd)
+  while (ret == SHELL_OK) {
+
+    start = end = -1;
+
+    //Find $(
+    for(i = 0; i < argc - 1; i++) {
+      if(sh->parser->lex[i].type == LEX_STR
+         && sh->parser->lex[i].end - sh->parser->lex[i].start == 1
+         && *sh->parser->lex[i].start == '$'
+         && sh->parser->lex[i+1].type == LEX_LPAREN) {
+        start = i;
+      }
+    }
+
+    if(start == -1) {
+      break;
+    }
+
+    for(i = start; i < argc; i++) {
+      if(sh->parser->lex[i].type == LEX_RPAREN) {
+        end = i;
+        break;
+      }
+    }
+
+    if(end == -1) {
+      //No closed )
+      break;
+    }
+
+    sh->parser->arg0 = start + 2;
+    if((ret = command_substitution(sh, end - start - 2, &argv[start + 2], start, end + 1)) < 0) {
+      break;
+    }
+    argc = sh->parser->argc;
+    sh->parser->arg0 = 0;
+  }
+
+  //`cmd` (backstick-et cmd
+  while (ret == SHELL_OK) {
+
+    start = end = -1;
+
+    //Find $(
+    for(i = 0; i < argc - 1; i++) {
+      if(sh->parser->lex[i].type == LEX_BACKTICK) {
+        start = i;
+        break;
+      }
+    }
+
+    if(start == -1) {
+      break;
+    }
+
+    for(i = start + 1; i < argc; i++) {
+      if(sh->parser->lex[i].type == LEX_BACKTICK) {
+        end = i;
+        break;
+      }
+    }
+
+    if(end == -1) {
+      //No closed `
+      break;
+    }
+
+    sh->parser->arg0 = start + 1;
+    if((ret = command_substitution(sh, end - start - 1, &argv[start + 1], start, end + 1)) < 0) {
+      break;
+    }
+    argc = sh->parser->argc;
+    sh->parser->arg0 = 0;
+  }
+
+  if(ret == SHELL_OK) {
+    ret = exec1(sh, argc, argv, 0);
+  }
+  return ret;
 }
 /*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/
@@ -1188,7 +1231,8 @@ static int get_condition(C_SHELL *sh)
   cmd1 | cmd2 | cmd 3 | cmd4
   OUT    INOUT  INOUT    IN
 */
-static int exec0(C_SHELL *sh, int argc, char **argv)
+//Param stdout - File descriptor - where to redirect the latter in the chain output
+static int exec1(C_SHELL *sh, int argc, char **argv, int stdout)
 {
   int i, i0 = 0, arg0, r = SHELL_OK, f = 0;
 
@@ -1212,7 +1256,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
 
       if(i > i0) {
         sh->parser->arg0 = arg0 + i0;
-        r = exec1(sh, i - i0, &argv[i0]);
+        r = exec2(sh, i - i0, &argv[i0]);
         if(r < 0) {
           break;
         }
@@ -1227,11 +1271,11 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
         sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
         sh->stream.f[SHELL_STDIN] = sh->stream.f[SHELL_STDOUT];
       }
-      sh->stream.f[SHELL_STDOUT] = 0;
+      sh->stream.f[SHELL_STDOUT] = stdout;
     }
 
     sh->parser->arg0 = arg0 + i0;
-    r = exec1(sh, i - i0, &argv[i0]);
+    r = exec2(sh, i - i0, &argv[i0]);
   }
 
 
@@ -1239,7 +1283,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
     if(sh->stream.f[SHELL_STDIN] > 0) {
       sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
     }
-    if(sh->stream.f[SHELL_STDOUT] > 0) {
+    if(sh->stream.f[SHELL_STDOUT] > 0 && sh->stream.f[SHELL_STDOUT] != stdout) {
       sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDOUT]);
     }
     if(sh->stream.f[SHELL_STDERR] > 0) {
@@ -1259,7 +1303,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
  cmd  1>> OUT 2>> ERR < IN
  cmd  2> &1
 */
-static int exec1(C_SHELL *sh, int argc, char **argv)
+static int exec2(C_SHELL *sh, int argc, char **argv)
 {
   int i, i0, redirect, f;
   int argc_new;
@@ -1418,10 +1462,10 @@ static int exec1(C_SHELL *sh, int argc, char **argv)
   }
 
   argc = argc_new;
-  return exec3(sh, argc, argv);
+  return sh_exec(sh, argc, argv);
 }
 /*----------------------------------------------------------------------------*/
-static int exec3(C_SHELL *sh, int argc, char **argv)
+int sh_exec(C_SHELL *sh, int argc, char **argv)
 {
   int r, i, not = 0, argc0 = 0;
   char buffer[16];
@@ -1437,13 +1481,13 @@ static int exec3(C_SHELL *sh, int argc, char **argv)
     }
   }
 
-  if(is_debug_mode(sh)) {
-    shell_fprintf(sh, SHELL_STDERR, "[%c] [s:%d] [c:%d] [id:%d]", is_true_condition(sh) ? 'x' : ' ', context_stack(sh), sh->cache_stack, sh->op_id);
+  if(sh_is_debug_mode(sh)) {
+    shell_fprintf(sh, SHELL_STDERR, "[%c] [s:%d] [c:%d] [id:%d]", sh_is_true_condition(sh) ? 'x' : ' ', context_stack(sh), sh->cache_stack, sh->op_id);
     for(i = 0; i < argc; i++) {
       shell_fprintf(sh, SHELL_STDERR, " %s", argv[i]);
     }
 
-    if(is_cache_debug_mode(sh)) {
+    if(sh_is_cache_debug_mode(sh)) {
       unsigned allocated = 0, free = 0, count = 0;
       cache_stat(sh->cache, &allocated, &free, &count);
       shell_fprintf(sh, SHELL_STDERR, " cache:a:%u:f:%u:c:%u\n", allocated, free, count);
@@ -1459,7 +1503,7 @@ static int exec3(C_SHELL *sh, int argc, char **argv)
        && sh->parser->argc >= sh->parser->arg0 + 2
        && sh->parser->lex[sh->parser->arg0 + 0].type == LEX_STR
        && sh->parser->lex[sh->parser->arg0 + 1].type == LEX_ASSIGN) {
-      r = _assign(sh, argc, argv);
+      r = sh_assign(sh, argc, argv);
       break;
     }
 
@@ -1474,9 +1518,9 @@ static int exec3(C_SHELL *sh, int argc, char **argv)
     }
 
 
-    r = embed_exec(sh, argc, &argv[argc0]);
+    r = sh_embed_exec(sh, argc, &argv[argc0]);
     if(r == SHELL_ERR_COMMAND_NOT_FOUND) {
-      if(is_true_condition(sh) && sh->exec_cb.cb != NULL) {
+      if(sh_is_true_condition(sh) && sh->exec_cb.cb != NULL) {
         r = sh->exec_cb.cb(sh->exec_cb.arg, argc, &argv[argc0]);
       } else {
         r = SHELL_OK;
@@ -1494,499 +1538,10 @@ static int exec3(C_SHELL *sh, int argc, char **argv)
 
   if(r >= 0) {
     snprintf(buffer, sizeof(buffer), "%d", r);
-    set_var(sh, "_", buffer);
+    sh_set_var(sh, "_", buffer);
   }
 
   return r;
-}
-/*----------------------------------------------------------------------------*/
-static int embed_exec(C_SHELL *sh, int argc, char **argv)
-{
-  unsigned i, hash;
-
-  if(argc < 1)
-    return SHELL_ERR_INVALID_ARG;
-
-  hash = calc_hash(argv[0]);
-  for(i = 0; i < sizeof(std_fn)/sizeof(std_fn[0]); i++) {
-    if(std_fn[i].hash == hash) {
-       return std_fn[i].handler(sh, argc, argv);
-    }
-  }
-  return SHELL_ERR_COMMAND_NOT_FOUND;
-}
-/*----------------------------------------------------------------------------*/
-static int _eXit(C_SHELL *sh, int argc, char **argv)
-{
-  int exit_code = 0;
-
-  (void) sh;
-  (void) argc;
-  (void) argv;
-  if(!is_true_condition(sh))
-    return 0;
-  if(argc > 1)
-    exit_code = atoi(argv[1]);
-
-  exit_code %= 1000;
-
-  return SHELL_EXIT - (exit_code > 0 ? exit_code : - exit_code);
-}
-/*----------------------------------------------------------------------------*/
-static int _if(C_SHELL *sh, int argc, char **argv)
-{
-  int r1, r2;
-
-  if(argc < 2)
-    return SHELL_ERR_INVALID_ARG;
-
-  if(is_true_condition(sh)) {
-    sh->parser->arg0 ++; //Shift args
-    r1 = exec3(sh, argc - 1, &argv[1]);
-    if(r1 < 0)
-      return r1;
-  }
-  else
-    r1 = 1;
-
-  r2 = push_context(sh);
-  if(r2 < 0)
-    return r2;
-
-  set_condition(sh, r1);
-  set_opcode(sh, OP_IF);
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _then(C_SHELL *sh, int argc, char **argv)
-{
-  if(current_opcode(sh) != OP_IF) {
-    return SHELL_ERR_INVALID_OP;
-  }
-
-  if(argc > 1) {
-    sh->parser->arg0 ++; //Shift args
-    return   exec3(sh, argc - 1, &argv[1]);
-  }
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _fi(C_SHELL *sh, int argc, char **argv)
-{
-  (void) argc;
-  (void) argv;
-
-  if(current_opcode(sh) == OP_IF) {
-    return pop_context(sh);
-  }
-  return SHELL_ERR_INVALID_OP;
-}
-/*----------------------------------------------------------------------------*/
-static int _else(C_SHELL *sh, int argc, char **argv)
-{
-
-  (void) argc;
-  (void) argv;
-
-  if(current_opcode(sh) == OP_IF) {
-    if(!current_context(sh)->parent->condition) { //Parent condition
-      set_condition(sh, !get_condition(sh));
-      if(argc > 1) {
-        sh->parser->arg0 ++; //Shift args
-        return   exec3(sh, argc - 1, &argv[1]);
-      }
-    }
-    return SHELL_OK;
-  }
-  return SHELL_ERR_INVALID_OP;
-}
-/*----------------------------------------------------------------------------*/
-static int _elif(C_SHELL *sh, int argc, char **argv)
-{
-  int r;
-  r = _else(sh, argc, argv);
-  if(r < 0)
-    return r;
-  return _if(sh, argc, argv);
-}
-/*----------------------------------------------------------------------------*/
-static int _true(C_SHELL *sh, int argc, char **argv)
-{
-  (void) sh;
-  (void) argc;
-  (void) argv;
-  if(!is_true_condition(sh))
-    return 0;
-  return 0;
-}
-/*----------------------------------------------------------------------------*/
-static int _false(C_SHELL *sh, int argc, char **argv)
-{
-  (void) sh;
-  (void) argc;
-  (void) argv;
-  if(!is_true_condition(sh))
-    return 0;
-  return 1;
-}
-/*----------------------------------------------------------------------------*/
-static int _while(C_SHELL *sh, int argc, char **argv)
-{
-  int r;
-  C_SHELL_CONTEXT *c;
-
-  c = current_context(sh);
-  if(sh->op_id != c->op_id)
-  {
-    //First call
-    if((r = push_context(sh)) < 0)
-      return r;
-
-    c = current_context(sh);
-    c->op_code = OP_WHILE;
-    c->is_loop = 1;
-    c->should_store_cache = 1;
-  }
-
-
-  if(is_true_condition(sh))
-  {
-    r = 0;
-    if(argc > 1) {
-      sh->parser->arg0 ++; //Shift args
-      r = exec3(sh, argc - 1, &argv[1]);
-      if(r < 0) {
-        return r;
-      }
-    }
-
-    set_condition(sh, r);
-  }
-
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _until(C_SHELL *sh, int argc, char **argv)
-{
-  int r;
-  C_SHELL_CONTEXT *c;
-
-  c = current_context(sh);
-  if(sh->op_id != c->op_id)
-  {
-    //First call
-    if((r = push_context(sh)) < 0)
-      return r;
-
-    c = current_context(sh);
-    c->op_code = OP_WHILE;
-    c->is_loop = 1;
-    c->should_store_cache = 1;
-  }
-
-
-  if(is_true_condition(sh))
-  {
-    r = 0;
-    if(argc > 1) {
-      sh->parser->arg0 ++; //Shift args
-      r = exec3(sh, argc - 1, &argv[1]);
-      if(r < 0) {
-        return r;
-      }
-    }
-
-    set_condition(sh, !r);
-  }
-
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _for(C_SHELL *sh, int argc, char **argv)
-{
-  C_SHELL_CONTEXT *c;
-  int r;
-  if(argc < 4
-    || argv[2][0] != 'i'
-    || argv[2][1] != 'n'
-    || argv[2][2] != '\0')
-    return SHELL_ERR_INVALID_ARG;
-
-  c = current_context(sh);
-  if(sh->op_id != c->op_id)
-  {
-    //First call
-    if((r = push_context(sh)) < 0)
-      return r;
-    c = current_context(sh);
-    c->op_code = OP_IF;
-    c->is_loop = 1;
-    c->should_store_cache = 1;
-  }
-  else
-  {
-    c->for_index ++;
-  }
-
-
-  if(c->for_index < argc - 3 && is_true_condition(sh))
-  {
-    set_true_condition(sh);
-    set_var(sh, argv[1], argv[c->for_index + 3]);
-  }
-  else
-  {
-    set_false_condition(sh);
-  }
-
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _do(C_SHELL *sh, int argc, char **argv)
-{
-
-  if(!current_context(sh)->is_loop) {
-    return SHELL_ERR_INVALID_OP;
-  }
-
-  if(argc > 1) {
-    sh->parser->arg0 ++; //Shift args
-    return   exec3(sh, argc - 1, &argv[1]);
-  }
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _and(C_SHELL *sh, int argc, char **argv)
-{
-  int cond = NOT_TRUE_CONDITION;
-  if(!is_true_condition(sh))
-    return NOT_TRUE_CONDITION;
-
-  shell_get_int_var(sh, "_", &cond);
-
-  if(argc > 1 && !cond) {
-    sh->parser->arg0 ++; //Shift args
-    cond = exec3(sh, argc - 1, &argv[1]);
-  }
-  return cond;
-}
-/*----------------------------------------------------------------------------*/
-static int _or(C_SHELL *sh, int argc, char **argv)
-{
-  int cond = NOT_TRUE_CONDITION;
-  if(!is_true_condition(sh))
-    return NOT_TRUE_CONDITION;
-
-  shell_get_int_var(sh, "_", &cond);
-
-  if(argc > 1) {
-    sh->parser->arg0 ++; //Shift args
-    cond = exec3(sh, argc - 1, &argv[1]);
-  }
-  return cond;
-}
-/*----------------------------------------------------------------------------*/
-static int _done(C_SHELL *sh, int argc, char **argv)
-{
-  int r;
-  C_SHELL_CONTEXT *c;
-  (void) argc;
-  (void) argv;
-
-  c = current_context(sh);
-
-  if(!c->is_loop) {
-    return SHELL_ERR_INVALID_OP;
-  }
-
-  if(c->is_continue) {
-    set_true_condition(sh);
-    c->is_continue = 0;
-  }
-
-  while(is_true_condition(sh)) {
-    r = play_cache(sh);
-    if(r < 0)
-      return r;
-
-    if(c->is_continue) {
-      set_true_condition(sh);
-      c->is_continue = 0;
-    }
-  }
-
-  pop_context(sh);
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _break(C_SHELL *sh, int argc, char **argv)
-{
-  C_SHELL_CONTEXT *loop_context, *c;
-
-  (void) argc;
-  (void) argv;
-
-  loop_context = current_context(sh);
-  while(loop_context != NULL) {
-    if(loop_context->is_loop) {
-      break;
-    }
-    loop_context = loop_context->parent;
-  }
-
-  if(loop_context == NULL) {
-    return SHELL_ERR_INVALID_OP;
-  }
-
-  if(!is_true_condition(sh))
-    return 0;
-
-
-  //Handle if
-  c = loop_context->child;
-  while (c != NULL) {
-    c->condition = NOT_TRUE_CONDITION;
-    c = c->child;
-  }
-
-
-  loop_context->condition = NOT_TRUE_CONDITION;
-  loop_context->is_continue = 0;
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _continue(C_SHELL *sh, int argc, char **argv)
-{
-  C_SHELL_CONTEXT *loop_context, *c;
-
-  (void) argc;
-  (void) argv;
-
-  loop_context = current_context(sh);
-  while(loop_context != NULL) {
-    if(loop_context->is_loop) {
-      break;
-    }
-    loop_context = loop_context->parent;
-  }
-
-  if(loop_context == NULL) {
-    return SHELL_ERR_INVALID_OP;
-  }
-
-  if(!is_true_condition(sh))
-    return 0;
-
-
-  //Handle if
-  c = loop_context->child;
-  while (c != NULL) {
-    c->condition = NOT_TRUE_CONDITION;
-    c = c->child;
-  }
-
-
-  loop_context->condition = NOT_TRUE_CONDITION;
-  loop_context->is_continue = 1;
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _echo(C_SHELL *sh, int argc, char **argv)
-{
-  int i = 1, endl=1, first = 1;
-  const char *p;
-
-  (void) sh;
-  (void) argc;
-  (void) argv;
-  if(!is_true_condition(sh))
-    return 0;
-
-  if(argc > 1 && !strcmp(argv[1], "-n")) {
-    i ++;
-    endl = 0;
-  }
-
-
-  for(; i < argc; i++) {
-    if(!first) {
-      if(sh->parser != NULL && sh->parser->arg0 + i - 1 < sh->parser->argc) {
-        p = sh->parser->lex[sh->parser->arg0 + i - 1].end;
-        while(p < sh->parser->lex[sh->parser->arg0 + i].start) {
-          shell_putc(sh, *p);
-          p ++;
-        }
-
-      }
-    }
-    shell_puts(sh, argv[i]);
-    first = 0;
-  }
-
-  if(endl)
-    shell_putc(sh, '\n');
-
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _test(C_SHELL *sh, int argc, char **argv)
-{
-  (void) sh;
-  (void) argc;
-  (void) argv;
-  if(!is_true_condition(sh))
-    return 0;
-
-#ifdef USE_SH_TEST
-  return test_main(argc, argv);
-#else //USE_SH_TEST
-  return intern_test(sh, argc, argv);
-#endif //USE_SH_TEST
-
-  return SHELL_ERR_NOT_IMPLEMENT;
-}
-/*----------------------------------------------------------------------------*/
-static int _set(C_SHELL *sh, int argc, char **argv)
-{
-  C_SHEL_VAR *v;
-  unsigned allocated=0, free=0, count=0;
-  (void) argc;
-  (void) argv;
-  if(!is_true_condition(sh))
-    return 0;
-
-  //Output vars
-  v = sh->vars;
-  while (v != NULL) {
-    shell_printf(sh, "%s='%s'\n", v->name, v->value);
-    v = v->next;
-  }
-  //Get cache stat
-  cache_stat(sh->cache, &allocated, &free, &count);
-  shell_puts(sh, "#cache\n");
-  shell_printf(sh, "%s=%u\n", "allocated", allocated);
-  shell_printf(sh, "%s=%u\n", "free", free);
-  shell_printf(sh, "%s=%u\n", "count", count);
-
-
-
-  return SHELL_OK;
-}
-/*----------------------------------------------------------------------------*/
-static int _assign(C_SHELL *sh, int argc, char **argv)
-{
-  if(!is_true_condition(sh) || argc < 2)
-    return TRUE_CONDITION;
-
-  //TODO: addition substitute vars
-  shell_set_var(sh, argv[0], argv[2]);
-
-  if(argc > 3) {
-    sh->parser->arg0 += 3; //Shift args
-    return   exec3(sh, argc - 3, &argv[3]);
-  }
-
-  return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
 static const char *lex_name(LEX_CODES l)
@@ -2010,6 +1565,7 @@ static const char *lex_name(LEX_CODES l)
     case LEX_RDSQB:     return "RDSQB";
     case LEX_LPAREN:    return "LPAREN";
     case LEX_RPAREN:    return "RPAREN";
+    case LEX_BACKTICK:    return "BACKTICK";
     case LEX_STR:      return "STR";
     case LEX_COMMENT:   return "COMMENT";
   }
@@ -2086,7 +1642,7 @@ static char otoc(const char **src)
   return (char) c;
 }
 /*----------------------------------------------------------------------------*/
-static unsigned var_subst(C_SHELL *sh, const char *begin, const char *end, char *buffer, unsigned buffer_size)
+static unsigned var_substitution(C_SHELL *sh, const char *begin, const char *end, char *buffer, unsigned buffer_size)
 {
   char *name = NULL;
   const char *value;
@@ -2118,7 +1674,7 @@ static unsigned var_subst(C_SHELL *sh, const char *begin, const char *end, char 
   return i;
 }
 /*----------------------------------------------------------------------------*/
-static unsigned var_substitution(C_SHELL *sh, const char **src, unsigned size, char *buffer, unsigned buffer_size)
+static unsigned substitutions(C_SHELL *sh, const char **src, unsigned size, char *buffer, unsigned buffer_size)
 {
   static const char delimiters[] = "}$/\\ \t+*-=><!$&()";
   const char *p;
@@ -2127,13 +1683,13 @@ static unsigned var_substitution(C_SHELL *sh, const char **src, unsigned size, c
 
   for(i = 0; i < size; i++) {
     if(strchr(delimiters, p[i]) != NULL) {
-      dst_index = var_subst(sh, *src, &p[i], buffer, buffer_size);
+      dst_index = var_substitution(sh, *src, &p[i], buffer, buffer_size);
       break;
     }
   }
 
   if(i >= size) {
-    dst_index = var_subst(sh, *src, &p[size], buffer, buffer_size);
+    dst_index = var_substitution(sh, *src, &p[size], buffer, buffer_size);
   }
 
   *src = &p[i];
@@ -2204,7 +1760,7 @@ static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, u
 
     if(*p == '$' && use_vars) {
       p ++;
-      i += var_substitution(sh, &p, end - p, &buffer[i], buffer_size - i);
+      i += substitutions(sh, &p, end - p, &buffer[i], buffer_size - i);
       continue;
     }
     buffer[i ++] = *p;
@@ -2281,7 +1837,7 @@ static int context_stack(C_SHELL *sh)
   C_SHELL_CONTEXT *c;
   int s = 0;
 
-  c = root_context(sh)->child;
+  c = sh_root_context(sh)->child;
   while(c != NULL) {
     s ++;
     c = c->child;
@@ -2289,10 +1845,10 @@ static int context_stack(C_SHELL *sh)
   return s;
 }
 /*----------------------------------------------------------------------------*/
-static int push_context(C_SHELL *sh)
+int sh_push_context(C_SHELL *sh)
 {
   C_SHELL_CONTEXT *c;
-  c = current_context(sh);
+  c = sh_current_context(sh);
   c->child = cache_alloc(sh->cache, sizeof(C_SHELL_CONTEXT));
   if(c->child == NULL) {
     return SHELL_ERR_MALLOC;
@@ -2304,18 +1860,18 @@ static int push_context(C_SHELL *sh)
   return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
-static int pop_context(C_SHELL *sh)
+int sh_pop_context(C_SHELL *sh)
 {
   C_SHELL_CONTEXT *c, *parent;
 
-  c = current_context(sh);
+  c = sh_current_context(sh);
   parent = c->parent;
 
   if(parent == NULL) {
     return SHELL_ERR_INVALID_OP;
   }
 
-  remove_cache(sh);
+  sh_remove_cache(sh);
   parent->child = NULL;
   cache_free(sh->cache, c);
   return SHELL_OK;
@@ -2326,7 +1882,7 @@ static int add_src_to_cache(C_SHELL *sh, const char *src, unsigned size)
   C_SHELL_LINE_CACHE *lc = NULL;
   C_SHELL_CONTEXT *c;
 
-  c = root_context(sh);
+  c = sh_root_context(sh);
   while(c != NULL) {
     if(c->should_store_cache) {
       if(lc == NULL) {
@@ -2353,7 +1909,7 @@ static int add_src_to_cache(C_SHELL *sh, const char *src, unsigned size)
     }
     c = c->child;
   }
-  if(is_debug_mode(sh) && lc != NULL) {
+  if(sh_is_debug_mode(sh) && lc != NULL) {
     shell_fprintf(sh, SHELL_STDERR, "Cashed:*:s:%d:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
   }
 
@@ -2362,7 +1918,7 @@ static int add_src_to_cache(C_SHELL *sh, const char *src, unsigned size)
 /*----------------------------------------------------------------------------*/
 static void set_context_should_store_cache(C_SHELL *sh, int should_store)
 {
-  current_context(sh)->should_store_cache = should_store ? 1 : 0;
+  sh_current_context(sh)->should_store_cache = should_store ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
 static void add_cache_to_cache(C_SHELL *sh, C_SHELL_CONTEXT *parent, C_SHELL_LINE_CACHE *lc)
@@ -2384,12 +1940,12 @@ static void add_cache_to_cache(C_SHELL *sh, C_SHELL_CONTEXT *parent, C_SHELL_LIN
     c = c->child;
   }
 
-  if(is_debug_mode(sh) && add) {
+  if(sh_is_debug_mode(sh) && add) {
     shell_fprintf(sh, SHELL_STDERR, "Cashed:s:%d:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
   }
 }
 /*----------------------------------------------------------------------------*/
-static int play_cache(C_SHELL *sh)
+int sh_play_cache(C_SHELL *sh)
 {
   int r = SHELL_OK;
   int cache_mode;
@@ -2397,15 +1953,15 @@ static int play_cache(C_SHELL *sh)
   C_SHELL_CONTEXT *c;
   C_SHELL_LINE_CACHE *lc;
 
-  c = current_context(sh);
+  c = sh_current_context(sh);
   stack = context_stack(sh);
   lc = c->cache.first;
   if(lc == NULL) {
     return SHELL_ERR_INVALID_OP;
   }
-  cache_mode = is_cache_mode(sh);
+  cache_mode = sh_is_cache_mode(sh);
   op_id = sh->op_id;
-  set_cache_mode(sh, 1);
+  sh_set_cache_mode(sh, 1);
   sh->cache_stack ++;
   while (lc != NULL) {
     sh->op_id = lc->op_id;
@@ -2423,7 +1979,7 @@ static int play_cache(C_SHELL *sh)
 
     lc = lc->next;
   }
-  set_cache_mode(sh, cache_mode);
+  sh_set_cache_mode(sh, cache_mode);
   sh->cache_stack --;
   if(!cache_mode) {
     sh->op_id = op_id;
@@ -2432,19 +1988,19 @@ static int play_cache(C_SHELL *sh)
   return r;
 }
 /*----------------------------------------------------------------------------*/
-static int remove_cache(C_SHELL *sh)
+int sh_remove_cache(C_SHELL *sh)
 {
   C_SHELL_CONTEXT *c;
   C_SHELL_LINE_CACHE *lc, *next;
 
-  c = current_context(sh);
+  c = sh_current_context(sh);
   if(c->cache.root != NULL) {
     //cache root
     lc = c->cache.root;
     c->cache.root = NULL;
     while (lc != NULL) {
       next = lc->next;
-      if(is_debug_mode(sh)) {
+      if(sh_is_debug_mode(sh)) {
         shell_fprintf(sh, SHELL_STDERR, "Rm cache[%d]:id:%d:'%s'\n", context_stack(sh), lc->op_id, lc->text);
       }
       cache_free(sh->cache, lc);
@@ -2461,319 +2017,23 @@ static int remove_cache(C_SHELL *sh)
   return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
-static void set_cache_mode(C_SHELL *sh, int mode)
+void sh_set_cache_mode(C_SHELL *sh, int mode)
 {
   sh->cache_mode = mode ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
-static int is_cache_mode(C_SHELL *sh)
+int sh_is_cache_mode(C_SHELL *sh)
 {
   return   sh->cache_mode  ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
-static void set_opcode(C_SHELL *sh, OP_CODE c)
+void sh_set_opcode(C_SHELL *sh, OP_CODE c)
 {
-  current_context(sh)->op_code = c;
+  sh_current_context(sh)->op_code = c;
 }
 /*----------------------------------------------------------------------------*/
-static OP_CODE current_opcode(C_SHELL *sh)
+OP_CODE sh_opcode(C_SHELL *sh)
 {
-  return   current_context(sh)->op_code;
+  return   sh_current_context(sh)->op_code;
 }
 /*----------------------------------------------------------------------------*/
-#ifndef USE_SH_TEST
-/*----------------------------------------------------------------------------*/
-typedef struct {
-  C_SHELL *sh;
-  int arg0;
-  int argc;
-  LEX_ELEM lex[MAX_LEXER_SIZE];
-  char *argv[MAX_LEXER_SIZE];
-} TEST_DATA;
-/*----------------------------------------------------------------------------*/
-static int error_msg(TEST_DATA *data, const char *fmt, ...)
-{
-  va_list ap;
-  int r;
-  va_start(ap, fmt);
-  r = shell_vprintf(data->sh, fmt, ap);
-  va_end(ap);
-  r += shell_fputc(data->sh, SHELL_STDERR, '\n');
-  return r;
-}
-/*----------------------------------------------------------------------------*/
-static void syntax(TEST_DATA *data, const char *op, const char *msg)
-{
-  if (op && *op) {
-    error_msg(data, "%s: %s", op, msg);
-  } else {
-    error_msg(data, "%s", msg);
-  }
-}
-/*----------------------------------------------------------------------------*/
-static void debug_msg(TEST_DATA *data, const char *op)
-{
-  int i;
-  if(!is_debug_mode(data->sh))
-    return;
-  shell_fprintf(data->sh, SHELL_STDERR, "<<op:%s:", op == NULL ? "" : op);
-  shell_fprintf(data->sh, SHELL_STDERR, "arg0:%d:argc:%d", data->arg0, data->argc);
-
-  for(i = data->arg0; i < data->argc; i++) {
-    shell_fprintf(data->sh, SHELL_STDERR, ":%s", data->argv[i]);
-  }
-  shell_fprintf(data->sh, SHELL_STDERR, ">>\n");
-}
-/*----------------------------------------------------------------------------*/
-/* test(1) accepts the following grammar:
-  oexpr	::= aexpr | aexpr "-o" oexpr ;
-  aexpr	::= nexpr | nexpr "-a" aexpr ;
-  nexpr	::= primary | "!" primary
-  primary ::= unary-operator operand
-    | operand binary-operator operand
-    | operand
-    | "(" oexpr ")"
-    ;
-  unary-operator ::= "!";
-
-  binary-operator ::= "="|"=="|"!="|">="|">"|"<="|"<"
-  operand ::= <any legal UNIX file name>
-*/
-/*----------------------------------------------------------------------------*/
-static int oexpr(TEST_DATA *data);
-static int aexpr(TEST_DATA *data);
-static int nexpr(TEST_DATA *data);
-static int binop(TEST_DATA *data);
-static int operand(TEST_DATA *data);
-static int primary(TEST_DATA *data);
-enum {
-  LEX_IEQ = 100   // -eq
-  , LEX_INE = 101 // -ne
-  , LEX_IGT = 102 // -gt
-  , LEX_IGE = 103 // -ge
-  , LEX_ILT = 104 // -lt
-  , LEX_ILE = 105 // -li
-} NUM_COMPARE;
-/*----------------------------------------------------------------------------*/
-static int intern_test(C_SHELL *sh, int argc, char **argv)
-{
-  int res, i;
-  TEST_DATA *data;
-
-
-  /*Use arggs from shell parser*/
-  (void) argc;
-  (void) argv;
-
-  data = (TEST_DATA *) cache_alloc(sh->cache, sizeof(TEST_DATA));
-  if(data == NULL) {
-    return SHELL_ERR_MALLOC;
-  }
-
-  memset(data, 0, sizeof(TEST_DATA));
-
-  do {
-    data->sh = sh;
-    data->argc = argc;
-    data->arg0 = 0;
-
-    for(i = 0; i < sh->parser->argc - sh->parser->arg0; i++) {
-      data->lex[i] = sh->parser->lex[i + sh->parser->arg0];
-      data->argv[i] = sh->parser->argv[i + sh->parser->arg0];
-
-      if(data->lex[i].type == LEX_STR) {
-        //Addition parse for short option
-        if(!strcmp(data->argv[i], "-a")) {
-          data->lex[i].type = LEX_AND;
-          continue;
-        }
-        if(!strcmp(data->argv[i], "-o")) {
-          data->lex[i].type = LEX_OR;
-          continue;
-        }
-        if(!strcmp(data->argv[i], "-eq")) {
-          data->lex[i].type = LEX_IEQ;
-          continue;
-        }
-        if(!strcmp(data->argv[i], "-ne")) {
-          data->lex[i].type = LEX_INE;
-          continue;
-        }
-        if(!strcmp(data->argv[i], "-gt")) {
-          data->lex[i].type = LEX_IGT;
-          continue;
-        }
-        if(!strcmp(data->argv[i], "-ge")) {
-          data->lex[i].type = LEX_IGE;
-          continue;
-        }
-        if(!strcmp(data->argv[i], "-lt")) {
-          data->lex[i].type = LEX_ILT;
-          continue;
-        }
-        if(!strcmp(data->argv[i], "-le")) {
-          data->lex[i].type = LEX_ILE;
-          continue;
-        }
-      }
-    }
-
-    //Addition string handle: skeep spaces
-    for(i = 0; i < data->argc; i++) {
-      if(data->lex[i].type == LEX_STR) {
-        while(data->argv[i][0] == ' ') {
-          data->argv[i] ++;
-        }
-      }
-    }
-
-    debug_msg(data, "test");
-    if(data->lex[0].type == LEX_LSQB) {
-      data->arg0 ++;
-      data->argc --;
-      if(data->lex[data->argc].type != LEX_RSQB) {
-        error_msg(data, "missing ]");
-        res = 2;
-        break;
-      }
-    }
-    else
-    if(data->lex[0].type == LEX_LDSQB) {
-      data->argc --;
-      data->arg0 ++;
-      if(data->lex[data->argc].type != LEX_RDSQB) {
-        error_msg(data, "missing ]]");
-        res = 2;
-        break;
-      }
-    }
-    else {
-      data->arg0 ++;
-    }
-
-    if (data->argc <= data->arg0) {
-      res = 1;
-      break;
-    }
-
-    res = !oexpr(data);
-  } while(0);
-
-  cache_free(sh->cache, data);
-  return res;
-}
-/*----------------------------------------------------------------------------*/
-static int oexpr(TEST_DATA *data)
-{
-  int res;
-  debug_msg(data, "oexpr");
-  res = aexpr(data);
-  if (data->lex[data->arg0].type == LEX_OR) {
-    data->arg0 ++;
-    return oexpr(data) || res;
-  }
-  return res;
-}
-/*----------------------------------------------------------------------------*/
-static int aexpr(TEST_DATA *data)
-{
-  int res;
-
-  debug_msg(data, "aexpr");
-  res = nexpr(data);
-  if (data->lex[data->arg0].type == LEX_AND) {
-    data->arg0 ++;
-    return aexpr(data) && res;
-  }
-  return res;
-}
-/*----------------------------------------------------------------------------*/
-static int nexpr(TEST_DATA *data)
-{
-  debug_msg(data, "nexpr");
-  if (data->lex[data->arg0].type == LEX_NOT) {
-    data->arg0 ++;
-    return !nexpr(data);
-  }
-  return primary(data);
-}
-/*----------------------------------------------------------------------------*/
-static int primary(TEST_DATA *data)
-{
-  int res;
-  debug_msg(data, "primary");
-  if (data->argc <= data->arg0) {
-    syntax(data, NULL, "Argument expected");
-    return 0;
-  }
-
-  if(data->lex[data->arg0].type == LEX_LPAREN) {
-    data->arg0 ++;
-    res = oexpr(data);
-    if(data->lex[data->arg0].type != LEX_RPAREN) {
-      syntax(data, NULL, "Closing paren expected");
-    }
-    data->arg0 ++;
-    return res;
-  }
-
-  if(data->arg0 < data->argc + 2
-     && data->lex[data->arg0].type == LEX_STR
-     && data->lex[data->arg0 + 2].type == LEX_STR)
-     {
-    res = binop(data);
-    data->arg0 += 3;
-    return res;
-  }
-
-  if(data->lex[data->arg0].type == LEX_STR) {
-    res = operand(data);
-    data->arg0 ++;
-    return res;
-  }
-
-  syntax(data, data->argv[data->arg0], "Invalid operation");
-  return 2;
-}
-/*----------------------------------------------------------------------------*/
-static int binop(TEST_DATA *data)
-{
-  debug_msg(data, "binop");
-  switch (data->lex[data->arg0 + 1].type) {
-    case LEX_EQ: case LEX_ASSIGN:
-      return !strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]);
-    case LEX_NE:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]);
-    case LEX_GT:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) > 0;
-    case LEX_GE:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) >= 0;
-    case LEX_LT:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) < 0;
-    case LEX_LE:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) <= 0;
-
-    case LEX_IEQ:
-      return atoi(data->argv[data->arg0]) == atoi(data->argv[data->arg0 + 2]);
-    case LEX_INE:
-      return atoi(data->argv[data->arg0]) != atoi(data->argv[data->arg0 + 2]);
-    case LEX_IGT:
-      return atoi(data->argv[data->arg0]) > atoi(data->argv[data->arg0 + 2]);
-    case LEX_IGE:
-      return atoi(data->argv[data->arg0]) >= atoi(data->argv[data->arg0 + 2]);
-    case LEX_ILT:
-      return atoi(data->argv[data->arg0]) < atoi(data->argv[data->arg0 + 2]);
-    case LEX_ILE:
-      return atoi(data->argv[data->arg0]) <= atoi(data->argv[data->arg0 + 2]);
-  }
-  syntax(data, data->argv[data->arg0 + 1], "Invalid operator");
-  return 2;
-}
-/*----------------------------------------------------------------------------*/
-static int operand(TEST_DATA *data)
-{
-  debug_msg(data, "operand");
-  return data->argv[data->arg0] != NULL && *data->argv[data->arg0] != 0;
-}
-/*----------------------------------------------------------------------------*/
-#endif //USE_SH_TEST

@@ -1,2 +1,2 @@
 echo -n 'Test '
-echo ok !! | read | read | read
+echo ok !! | rr | rr | rr

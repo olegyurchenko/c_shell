@@ -8,6 +8,7 @@ SOURCES= main.c \
 ../../lib/c_cache.c \
 ../../lib/loop_buff.c \
 ../../lib/c_sh.c \
+../../lib/c_sh_embed.c \
 ../../lib/c_tty.c \
 ../../lib/nprintf.c
 
