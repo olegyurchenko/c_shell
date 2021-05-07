@@ -1023,7 +1023,7 @@ static int var_subst(C_SHELL *sh, const char *start, const char *end, char *buff
   return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
-static int cmmd_subs(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size, unsigned *size)
+static int cmmd_subst(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size, unsigned *size)
 {
   int ret = SHELL_OK, f = 0, r, i;
   typedef struct {
