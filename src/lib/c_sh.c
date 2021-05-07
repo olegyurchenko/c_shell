@@ -1060,6 +1060,8 @@ static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, in
       break;
     }
     buffer[i] = 0;
+    /*Optimize memory alloc*/
+    buffer = cache_realloc(sh->cache, buffer, i + 1);
 
     //Parse string
     data->parser.arg0 = 0;
@@ -1143,7 +1145,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
   int i, start, end, ret = SHELL_OK;
 
   //$(cmd)
-  while (1) {
+  while (ret == SHELL_OK) {
 
     start = end = -1;
 
@@ -1182,7 +1184,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
   }
 
   //`cmd` (backstick-et cmd
-  while (1) {
+  while (ret == SHELL_OK) {
 
     start = end = -1;
 
@@ -1218,7 +1220,10 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
     sh->parser->arg0 = 0;
   }
 
-  return exec1(sh, argc, argv, 0);
+  if(ret == SHELL_OK) {
+    ret = exec1(sh, argc, argv, 0);
+  }
+  return ret;
 }
 /*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/

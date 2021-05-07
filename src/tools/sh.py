@@ -28,7 +28,7 @@ names = ("exit"
 , "[["
 , "set"
 , "read"
-, "tea"
+, "tee"
 , "seq"
 )
 

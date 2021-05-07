@@ -3,3 +3,5 @@
 . loop_test.sh
 . test_test.sh
 . var_test.sh
+. redirect_test.sh
+. cmdsubst_test.sh

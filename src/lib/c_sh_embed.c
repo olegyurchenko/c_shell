@@ -68,7 +68,7 @@ static int sh_set(C_SHELL *sh, int argc, char **argv);
 static int sh_and(C_SHELL *sh, int argc, char **argv);
 static int sh_or(C_SHELL *sh, int argc, char **argv);
 static int sh_read(C_SHELL *sh, int argc, char **argv);
-static int sh_tea(C_SHELL *sh, int argc, char **argv);
+static int sh_tee(C_SHELL *sh, int argc, char **argv);
 static int sh_seq(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 typedef struct {
@@ -102,7 +102,7 @@ static const STD_FN std_fn[] = {
   , {0x00596f51, "&&", sh_and}
   , {0x00597abd, "||", sh_or}
   , {0x7c9d4d41, "read", sh_read}
-  , {0x0b88adbf, "tea", sh_tea}
+  , {0x0b88adc3, "tee", sh_tee}
   , {0x0b88a98e, "seq", sh_seq}
 };
 /*----------------------------------------------------------------------------
@@ -717,7 +717,7 @@ int sh_read(C_SHELL *sh, int argc, char **argv)
   return ret;
 }
 /*----------------------------------------------------------------------------*/
-static int sh_tea(C_SHELL *sh, int argc, char **argv)
+static int sh_tee(C_SHELL *sh, int argc, char **argv)
 {
   int i, count = 0, ret = SHELL_OK, r, size;
   SHELL_STREAM_MODE mode = SHELL_OUT;
@@ -823,10 +823,19 @@ static int sh_seq(C_SHELL *sh, int argc, char **argv)
 
   if( (first < last && step > 0)
       || (first > last && step < 0)) {
+
     for(i = first; i <= last; i += step) {
       if((r = shell_printf(sh, "%d\n", i)) <= 0) {
         ret = r;
         break;
+      }
+      //Prevent looping
+      if(sh->step_cb.cb != NULL) {
+        r = sh->step_cb.cb(sh->step_cb.arg, argc, argv);
+        if(r < 0) {
+          ret = r;
+          break;
+        }
       }
     }
   }
