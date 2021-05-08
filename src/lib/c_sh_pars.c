@@ -560,14 +560,14 @@ void args_print(C_SHELL *sh, int argc, char **argv)
   shell_fprintf(sh, SHELL_STDERR, "%10s\n", "}");
 }
 /*----------------------------------------------------------------------------*/
-static int var_subst(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size, unsigned *size)
+static int var_subst(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size)
 {
   const char *value;
- char *name;
+  char *name;
+  unsigned size = 0;
 
-  *size = 0;
 
-  if(start <= end) {
+  if(start >= end) {
     return SHELL_OK;
   }
 
@@ -580,17 +580,18 @@ static int var_subst(C_SHELL *sh, const char *start, const char *end, char *buff
   value = sh_get_var(sh, name);
   cache_free(sh->cache, name);
 
-  while(*value && *size < buffer_size) {
-    buffer[*size] = *value;
-    (*size) ++;
+  while(*value && size < buffer_size) {
+    buffer[size] = *value;
+    size ++;
     value ++;
   }
-  return SHELL_OK;
+  return size;
 }
 /*----------------------------------------------------------------------------*/
-static int cmmd_subst(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size, unsigned *size)
+static int cmd_subst(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size)
 {
-  int ret = SHELL_OK, f = 0, r, i;
+  int ret = SHELL_OK, f = 0, r, i, last_cr;
+  unsigned size = 0;
   typedef struct {
     C_SHELL_PARSER parser;
 
@@ -598,7 +599,6 @@ static int cmmd_subst(C_SHELL *sh, const char *start, const char *end, char *buf
 
   command_substitution_t *data = NULL;
 
-  *size = 0;
 
   if(sh->stream.ext_handler == NULL) {
     return SHELL_ERR_NOT_IMPLEMENT;
@@ -654,34 +654,41 @@ static int cmmd_subst(C_SHELL *sh, const char *start, const char *end, char *buf
       }
     }
 
-    if(SHELL_OK != ret) {
+    if(ret < 0) {
       break;
     }
 
     //Read command output
-    while (*size < (buffer_size - 1)) {
-      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[*size], 1);
+    while (size < (buffer_size - 1)) {
+      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[size], 1);
       if(r < 0) {
         ret = r;
         break;
       }
 
-      if(r == 0 || !buffer[*size]) {
+      if(r == 0 || !buffer[size]) {
         break;
       }
 
-      if(buffer[*size] == '\n' || buffer[*size] == '\r') {
-        buffer[*size] = ' ';
+      last_cr = 0;
+      if(buffer[size] == '\n' || buffer[size] == '\r') {
+        buffer[size] = ' ';
+        last_cr = 1;
       }
 
-      (*size) ++;
+      size ++;
     }
-    buffer[*size] = 0;
+    if(size && last_cr) {
+      size --;
+    }
+    buffer[size] = 0;
 
-    if(SHELL_OK != ret) {
+    if(ret < 0) {
       break;
     }
     //Read command output end
+
+    ret = size;
 
   } while(0);
 
@@ -689,6 +696,195 @@ static int cmmd_subst(C_SHELL *sh, const char *start, const char *end, char *buf
     sh->stream.ext_handler->_close(sh->stream.ext_handler->data, f);
   }
   cache_free(sh->cache, data);
+  return ret;
+}
+/*----------------------------------------------------------------------------*/
+static const char *subst_find(const char *src, unsigned size, int what)
+{
+  int quote = 0;
+  unsigned i;
+  for(i = 0; i < size; i++) {
+
+    if(src[i] == '\\') {
+      i ++;
+      continue;
+    }
+
+    if(src[i] == '\'') {
+      if(!quote) {
+        quote = src[i];
+      }
+      else {
+        quote = 0;
+      }
+      continue;
+    }
+
+    if(quote)
+      continue;
+
+    if(src[i] == what) {
+      return &src[i];
+    }
+  }
+  return NULL;
+}
+/*----------------------------------------------------------------------------*/
+int make_substitutions(C_SHELL *sh, const char *src, unsigned size, char *dst, unsigned dst_size)
+{
+  static const char delimiters[] = "{}/\\+*-=><!$&()\"\'`";
+  char *in_buffer = NULL, *out_buffer = NULL, *buf;
+  const char *p, *start, *end, *next;
+  unsigned buffer_size = 16 * 1024, index;
+
+  int ret = 0;
+
+  enum {
+    NO_SUBS,
+    DUMMY_SUBS,
+    PAREN_SUBS,  //${name}
+    BRACES_SUBS, //$(cmd)
+    BACKTICK_SUBS, //`cmd`
+    SIMPLE_SUBS  //$xxx
+  } type;
+
+  p = src;
+
+  do {
+
+    while (1) {
+      type = NO_SUBS;
+      p = subst_find(p, size - (p - src), '$');
+      start = end = p;
+
+      if(p == NULL) {
+        p = subst_find(src, size, '`');
+        start = end = p;
+      }
+
+      if(p == NULL) {
+        if(size >= dst_size) {
+          size = dst_size - 1;
+        }
+        memcpy(dst, src, size);
+        dst[size] = 0;
+        ret = size;
+        break;
+      }
+
+      if(*p == '$') { //Dollar substitutions
+        end = ++p;
+        if(*p == '{') {
+          type = PAREN_SUBS;
+          if((end = subst_find(p, size - (p - src), '}')) == NULL) {
+            type = DUMMY_SUBS;
+            end = ++ p;
+          } else {
+            end ++;
+          }
+
+
+        } else if(*p == '(') {
+          type = BRACES_SUBS;
+          if((end = subst_find(p, size - (p - src), ')')) == NULL) {
+            type = DUMMY_SUBS;
+            end = ++ p;
+          } else {
+            end ++;
+            next = subst_find(p, size - (p - src), '$');
+            if(next != NULL) {
+              p = next;
+              continue;
+            }
+          }
+
+        } else {
+          type = SIMPLE_SUBS;
+          while (end < &src[size]) {
+            if(!*end || isblank(*end) || strchr(delimiters, *end) != NULL) {
+              break;
+            }
+            end ++;
+          }
+        }
+        //Dollar substitutions end
+      } else {
+        //Backstick substitution
+        end = ++p;
+        type = BACKTICK_SUBS;
+        if((end = subst_find(p, size - (p - src), '`')) == NULL) {
+          type = DUMMY_SUBS;
+          end = p;
+        } else {
+          end ++;
+        }
+        //Backstick substitution end
+      }
+
+      if(out_buffer == NULL) {
+        out_buffer = cache_alloc(sh->cache, buffer_size);
+      } else {
+        out_buffer = cache_realloc(sh->cache, out_buffer, buffer_size);
+      }
+
+      if(out_buffer == NULL) {
+        ret = SHELL_ERR_MALLOC;
+        break;
+      }
+      index = start - src;
+      memcpy(out_buffer, src, index);
+      out_buffer[index] = 0;
+      ret = 0;
+      switch(type) {
+        case PAREN_SUBS:  //${}
+          ret = var_subst(sh, start + 2, end - 1, &out_buffer[index], buffer_size - index);
+          break;
+        case BRACES_SUBS: //$()
+          ret = cmd_subst(sh, start + 2, end - 1, &out_buffer[index], buffer_size - index);
+          break;
+        case BACKTICK_SUBS: //`xxx`
+          ret = cmd_subst(sh, start + 1, end - 1, &out_buffer[index], buffer_size - index);
+          break;
+        case SIMPLE_SUBS:  //$xxx
+          ret = var_subst(sh, start + 1, end, &out_buffer[index], buffer_size - index);
+          break;
+        default:
+          break;
+      }
+
+      if(ret < 0) {
+        break;
+      }
+      index += ret;
+      p = end;
+      size -= p - src;
+      if(size >= buffer_size - index) {
+        size = buffer_size - index - 1;
+      }
+      memcpy(&out_buffer[index], p, size);
+      size += index;
+      out_buffer[size] = 0;
+
+
+
+      out_buffer = cache_realloc(sh->cache, out_buffer, size);
+
+      //in_buffer <-> out_buffer
+      buf = in_buffer;
+      in_buffer = out_buffer;
+      out_buffer = buf;
+      p = src = in_buffer;
+    }
+
+
+  } while(0);
+
+  if(in_buffer != NULL) {
+    cache_free(sh->cache, in_buffer);
+  }
+  if(out_buffer != NULL) {
+    cache_free(sh->cache, out_buffer);
+  }
   return ret;
 }
 /*----------------------------------------------------------------------------*/

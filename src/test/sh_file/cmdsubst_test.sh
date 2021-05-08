@@ -14,8 +14,17 @@ if [ "$x" == "22222222222222" ] ; then echo Ok ; else echo Failed ; fi
 
 x=''
 for i in `seq 5`;do
-x=${x}$i
+x=${x}`echo $i`
 done
 
- echo -n "Test4 "
+
+echo -n "Test4 "
 if [ "$x" == "12345" ] ; then echo Ok ; else echo Failed ; fi
+
+
+x=5555
+x="123` echo 45`"
+#echo "x=>$x<"
+echo -n "Test5 "
+if [ "$x" == "12345" ] ; then echo Ok ; else echo Failed ; fi
+

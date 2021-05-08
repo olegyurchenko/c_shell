@@ -25,6 +25,7 @@ void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size);
 unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size);
 int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv);
 void args_print(C_SHELL *sh, int argc, char **argv);
+int make_substitutions(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsigned buffer_size);
 
 #ifdef __cplusplus
 } //extern "C"

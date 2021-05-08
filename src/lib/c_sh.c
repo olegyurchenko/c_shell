@@ -518,33 +518,30 @@ int shell_get_int_var(C_SHELL *sh, const char *name, int *value)
 int exec_str(C_SHELL *sh, const char *str, int from_cache)
 {
   int i, r = SHELL_OK;
-  const char *end;
-  unsigned size;
+  const char *end, *p;
+  unsigned size, buffer_size = 16*1024;
+  char *buffer = NULL;
 
   typedef struct {
     C_SHELL_PARSER parser;
-    const char *start;
-    const char *end;
-    char source[1];
+    const char *src_start;
+    const char *src_end;
   } exec_str_t;
 
   exec_str_t *data;
 
   size = strlen(str);
-  data = (exec_str_t *) cache_alloc(sh->cache, sizeof(exec_str_t) + size);
+  data = (exec_str_t *) cache_alloc(sh->cache, sizeof(exec_str_t));
   if(data == NULL) {
     return SHELL_ERR_MALLOC;
   }
-  memset(data, 0, sizeof(exec_str_t) + size);
-  memcpy(data->source, str, size);
-  str = data->source;
+  memset(data, 0, sizeof(exec_str_t));
 
   while(1) {
     end = NULL;
     size = strlen(str);
     data->parser.arg0 = 0;
     data->parser.argc = 0;
-    sh->parser = &data->parser;
 
     r = lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
@@ -557,9 +554,36 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     }
 
     if(r) {
+      data->src_start = data->parser.lex[0].start;
+      data->src_end = data->parser.lex[r - 1].end;
+
+      if(buffer == NULL) {
+        buffer = cache_alloc(sh->cache, buffer_size);
+      } else {
+        buffer = cache_realloc(sh->cache, buffer, buffer_size);
+      }
+      if(buffer == NULL) {
+        r = SHELL_ERR_MALLOC;
+        break;
+      }
+
+      r = make_substitutions(sh, data->src_start, data->src_end - data->src_start, buffer, buffer_size);
+      if(r < 0) {
+        break;
+      }
+      size = r;
+      buffer = cache_realloc(sh->cache, buffer, size + 1);
+      r = lexer(buffer, size, &p, data->parser.lex, MAX_LEXER_SIZE);
+      if(r < 0) {
+        break;
+      }
+    }
+
+
+
+
+    if(r) {
       data->parser.argc = r;
-      data->start = data->parser.lex[0].start,
-      data->end = data->parser.lex[data->parser.argc - 1].end;
 
       if(sh_is_lex_debug_mode(sh)) {
         lex_print(sh, data->parser.lex, data->parser.argc);
@@ -578,7 +602,9 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
         sh->op_id ++;
       }
 
+      sh->parser = &data->parser;
       r = sh_exec0(sh, data->parser.argc, data->parser.argv);
+      sh->parser = NULL;
 
       for(i = 0; i < MAX_LEXER_SIZE; i++) {
         if(data->parser.argv[i] != NULL) {
@@ -593,7 +619,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
 
 
       if(!from_cache) {
-        r = add_src_to_cache(sh, data->start, data->end - data->start);
+        r = add_src_to_cache(sh, data->src_start, data->src_end - data->src_start);
         if(r < 0) {
           break;
         }
@@ -606,9 +632,10 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     }
     break;
   }
-
+  if(buffer != NULL) {
+    cache_free(sh->cache, buffer);
+  }
   cache_free(sh->cache, data);
-  sh->parser = NULL;
   return r;
 }
 /*----------------------------------------------------------------------------*/
