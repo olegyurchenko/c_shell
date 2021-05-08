@@ -11,6 +11,7 @@ shell.c \
 ../../lib/c_cache.c \
 ../../lib/c_sh.c \
 ../../lib/c_sh_embed.c \
+../../lib/c_sh_pars.c \
 ../../lib/nprintf.c
 
 OBJECTS=$(notdir $(SOURCES:%.c=%.o))

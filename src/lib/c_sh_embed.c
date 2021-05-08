@@ -538,7 +538,7 @@ int sh_continue(C_SHELL *sh, int argc, char **argv)
 /*----------------------------------------------------------------------------*/
 int sh_echo(C_SHELL *sh, int argc, char **argv)
 {
-  int i = 1, endl=1, first = 1;
+  int i = 1, endl, first = 1;
   const char *p;
 
   (void) sh;
@@ -547,6 +547,7 @@ int sh_echo(C_SHELL *sh, int argc, char **argv)
   if(!sh_is_true_condition(sh))
     return 0;
 
+  endl = 1;//shell_isaprint(sh, SHELL_STDOUT);
   if(argc > 1 && !strcmp(argv[1], "-n")) {
     i ++;
     endl = 0;

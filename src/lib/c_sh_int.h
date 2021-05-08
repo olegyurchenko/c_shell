@@ -155,7 +155,15 @@ struct C_SHELL_TAG {
 extern "C" {
 #endif /*__cplusplus*/
 
+/*----------------------------------------------------------------------------*/
 int sh_exec(C_SHELL *sh, int argc, char **argv);
+/*----------------------------------------------------------------------------*/
+int sh_exec0(C_SHELL *sh, int argc, char **argv);
+int sh_exec1(C_SHELL *sh, int argc, char **argv, int stdout);
+int sh_exec2(C_SHELL *sh, int argc, char **argv);
+/*----------------------------------------------------------------------------*/
+
+
 unsigned sh_hash(const char *str);
 
 

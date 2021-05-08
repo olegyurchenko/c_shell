@@ -14,6 +14,7 @@
 /*----------------------------------------------------------------------------*/
 #include "c_sh.h"
 #include "c_sh_int.h"
+#include "c_sh_pars.h"
 #include "c_sh_embed.h"
 /*----------------------------------------------------------------------------*/
 #undef STDLIB
@@ -50,20 +51,10 @@
 /*----------------------------------------------------------------------------*/
 #define DEBUG_MOODE
 /*----------------------------------------------------------------------------*/
-static int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
-static void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size);
-static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size);
-static int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv);
-static void args_print(C_SHELL *sh, int argc, char **argv);
-/*----------------------------------------------------------------------------*/
 static int context_stack(C_SHELL *sh);
 static void clear_vars(C_SHELL *sh);
 static int add_src_to_cache(C_SHELL *sh, const char *src, unsigned size);
 static void set_context_should_store_cache(C_SHELL *sh, int should_store);
-/*----------------------------------------------------------------------------*/
-static int exec0(C_SHELL *sh, int argc, char **argv);
-static int exec1(C_SHELL *sh, int argc, char **argv, int stdout);
-static int exec2(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 const char *shell_err_string(C_SHELL *sh, int err)
 {
@@ -527,33 +518,30 @@ int shell_get_int_var(C_SHELL *sh, const char *name, int *value)
 int exec_str(C_SHELL *sh, const char *str, int from_cache)
 {
   int i, r = SHELL_OK;
-  const char *end;
-  unsigned size;
+  const char *end, *p;
+  unsigned size, buffer_size = 16*1024;
+  char *buffer = NULL;
 
   typedef struct {
     C_SHELL_PARSER parser;
-    const char *start;
-    const char *end;
-    char source[1];
+    const char *src_start;
+    const char *src_end;
   } exec_str_t;
 
   exec_str_t *data;
 
   size = strlen(str);
-  data = (exec_str_t *) cache_alloc(sh->cache, sizeof(exec_str_t) + size);
+  data = (exec_str_t *) cache_alloc(sh->cache, sizeof(exec_str_t));
   if(data == NULL) {
     return SHELL_ERR_MALLOC;
   }
-  memset(data, 0, sizeof(exec_str_t) + size);
-  memcpy(data->source, str, size);
-  str = data->source;
+  memset(data, 0, sizeof(exec_str_t));
 
   while(1) {
     end = NULL;
     size = strlen(str);
     data->parser.arg0 = 0;
     data->parser.argc = 0;
-    sh->parser = &data->parser;
 
     r = lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
@@ -566,9 +554,36 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     }
 
     if(r) {
+      data->src_start = data->parser.lex[0].start;
+      data->src_end = data->parser.lex[r - 1].end;
+
+      if(buffer == NULL) {
+        buffer = cache_alloc(sh->cache, buffer_size);
+      } else {
+        buffer = cache_realloc(sh->cache, buffer, buffer_size);
+      }
+      if(buffer == NULL) {
+        r = SHELL_ERR_MALLOC;
+        break;
+      }
+
+      r = make_substitutions(sh, data->src_start, data->src_end - data->src_start, buffer, buffer_size);
+      if(r < 0) {
+        break;
+      }
+      size = r;
+      buffer = cache_realloc(sh->cache, buffer, size + 1);
+      r = lexer(buffer, size, &p, data->parser.lex, MAX_LEXER_SIZE);
+      if(r < 0) {
+        break;
+      }
+    }
+
+
+
+
+    if(r) {
       data->parser.argc = r;
-      data->start = data->parser.lex[0].start,
-      data->end = data->parser.lex[data->parser.argc - 1].end;
 
       if(sh_is_lex_debug_mode(sh)) {
         lex_print(sh, data->parser.lex, data->parser.argc);
@@ -587,7 +602,9 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
         sh->op_id ++;
       }
 
-      r = exec0(sh, data->parser.argc, data->parser.argv);
+      sh->parser = &data->parser;
+      r = sh_exec0(sh, data->parser.argc, data->parser.argv);
+      sh->parser = NULL;
 
       for(i = 0; i < MAX_LEXER_SIZE; i++) {
         if(data->parser.argv[i] != NULL) {
@@ -602,7 +619,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
 
 
       if(!from_cache) {
-        r = add_src_to_cache(sh, data->start, data->end - data->start);
+        r = add_src_to_cache(sh, data->src_start, data->src_end - data->src_start);
         if(r < 0) {
           break;
         }
@@ -615,9 +632,10 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     }
     break;
   }
-
+  if(buffer != NULL) {
+    cache_free(sh->cache, buffer);
+  }
   cache_free(sh->cache, data);
-  sh->parser = NULL;
   return r;
 }
 /*----------------------------------------------------------------------------*/
@@ -645,293 +663,6 @@ unsigned sh_hash(const char *str)
       h = ((h << 5) + h) + c; /* hash * 33 + c */
 
   return h;
-}
-/*----------------------------------------------------------------------------*/
-/*Lexer must used in test!!!*/
-static int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
-{
-  int count = 0, arg_size = 0, quote = 0;
-  unsigned i;
-  for(i = 0; i < size && count < (int) lex_size; i++) {
-
-    if(src[i] == '\\') {
-      i ++;
-      continue;
-    }
-
-    if(src[i] == '"' || src[i] == '\'') {
-      if(!quote) {
-        if(arg_size) {
-          dst[count].end = &src[i];
-          count ++;
-          arg_size = 0;
-        }
-        quote = src[i];
-
-        dst[count].type = LEX_STR;
-        dst[count].start = dst[count].end = &src[i];
-        arg_size ++;
-      }
-      else
-        if(src[i] == quote) {
-          quote = 0;
-          if(arg_size) {
-            dst[count].end = &src[i + 1];
-            count ++;
-            arg_size = 0;
-          }
-        }
-      continue;
-    }
-
-    if(quote)
-      continue;
-
-    if(src[i] == ' ' || src[i] == '\t') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-      continue;
-    }
-
-    if(src[i] == ';' || src[i] == '\r' || src[i] == '\n') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-      i ++;
-      break;
-    }
-
-    if(src[i] == '#') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_COMMENT;
-      dst[count].start = &src[i];
-      i = size;
-      dst[count].end = &src[i];
-      count ++;
-      arg_size = 0;
-      break;
-    }
-
-    if(src[i] == '=') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_ASSIGN;
-      dst[count].start = &src[i];
-      if(src[i + 1] == '=') {
-        dst[count].type = LEX_EQ;
-        i ++;
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //=
-
-    if(src[i] == '>') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_GT;
-      dst[count].start = &src[i];
-      if(src[i + 1] == '=') {
-        i ++;
-        dst[count].type = LEX_GE;
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //> >=
-
-    if(src[i] == '<') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_LT;
-      dst[count].start = &src[i];
-      if(src[i + 1] == '=') {
-        i ++;
-        dst[count].type = LEX_LE;
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //< <=
-
-    if(src[i] == '&') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_AMP;
-      dst[count].start = &src[i];
-      if(src[i + 1] == '&') {
-        i ++;
-        dst[count].type = LEX_AND;
-        if(count) {
-          i --;
-          break;
-        }
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //& &&
-
-    if(src[i] == '|') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_VERBAR;
-      dst[count].start = &src[i];
-      if(src[i + 1] == '|') {
-        i ++;
-        dst[count].type = LEX_OR;
-        if(count) {
-          i --;
-          break;
-        }
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //& &&
-
-    if(src[i] == '!') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_NOT;
-      dst[count].start = &src[i];
-      if(src[i + 1] == '=') {
-        dst[count].type = LEX_NE;
-        i ++;
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //! !=
-
-    if(src[i] == '[') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_LSQB;
-      dst[count].start = &src[i];
-      if(src[i + 1] == '[') {
-        i ++;
-        dst[count].type = LEX_LDSQB;
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //[ [[
-
-    if(src[i] == ']') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_RSQB;
-      dst[count].start = &src[i];
-      if(src[i + 1] == ']') {
-        i ++;
-        dst[count].type = LEX_RDSQB;
-      }
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //] ]]
-
-    if(src[i] == '(') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_LPAREN;
-      dst[count].start = &src[i];
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //(
-
-    if(src[i] == ')') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_RPAREN;
-      dst[count].start = &src[i];
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //(
-
-    if(src[i] == '`') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_BACKTICK;
-      dst[count].start = &src[i];
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //(
-
-    if(!arg_size) {
-      dst[count].type = LEX_STR;
-      dst[count].start = &src[i];
-      dst[count].end = &src[i];
-      arg_size ++;
-    }
-
-  }
-
-  if(arg_size) {
-    dst[count].end = &src[i];
-    count ++;
-  }
-
-  *end = &src[i];
-  return count;
 }
 /*----------------------------------------------------------------------------*/
 int sh_is_debug_mode(C_SHELL *sh)
@@ -995,235 +726,9 @@ int sh_get_condition(C_SHELL *sh)
   return sh_current_context(sh)->condition ? 1 : 0;
 }
 /*----------------------------------------------------------------------------*/
-static int command_substitution(C_SHELL *sh, int argc, char **argv, int arg0, int argend)
+int sh_exec0(C_SHELL *sh, int argc, char **argv)
 {
-  int i, f = 0, r, ret = SHELL_OK, delta;
-  const char *end;
-  unsigned buffer_size = 16 * 1024;
-  char *buffer = NULL;
-
-  typedef struct {
-    C_SHELL_PARSER parser;
-
-  } command_substitution_t;
-
-  command_substitution_t *data = NULL;
-
-  if(sh->stream.ext_handler == NULL) {
-    return SHELL_ERR_NOT_IMPLEMENT;
-  }
-
-  //Open output stream
-  f = sh->stream.ext_handler->_open(sh->stream.ext_handler->data, "", SHELL_FIFO);
-  if(f <= 0) {
-    return f < 0 ? f : SHELL_ERROR_OPEN_FILE;
-  }
-  do {
-    //Execute command
-    if((ret = exec1(sh, argc, argv, f)) != SHELL_OK) {
-      break;
-    }
-
-    data = (command_substitution_t *) cache_alloc(sh->cache, sizeof(command_substitution_t));
-    if(data == NULL) {
-      ret = SHELL_ERR_MALLOC;
-      break;
-    }
-    memset(data, 0, sizeof(command_substitution_t));
-    buffer = (char *) cache_alloc(sh->cache, buffer_size);
-    if(buffer == NULL) {
-      ret = SHELL_ERR_MALLOC;
-      break;
-    }
-
-    //Read command output
-    i = 0;
-     while (i < (int) (buffer_size - 1)) {
-      r = sh->stream.ext_handler->_read(sh->stream.ext_handler->data, f, &buffer[i], 1);
-      if(r < 0) {
-        ret = r;
-        break;
-      }
-
-      if(r == 0 || !buffer[i]) {
-        break;
-      }
-
-      if(buffer[i] == '\n' || buffer[i] == '\r') {
-        buffer[i] = ' ';
-      }
-
-      i ++;
-    }
-
-    if(SHELL_OK != ret) {
-      break;
-    }
-    buffer[i] = 0;
-    /*Optimize memory alloc*/
-    buffer = cache_realloc(sh->cache, buffer, i + 1);
-
-    //Parse string
-    data->parser.arg0 = 0;
-    data->parser.argc = 0;
-
-    r = lexer(buffer, i, &end, data->parser.lex, MAX_LEXER_SIZE);
-    if(r < 0) {
-      ret = r;
-      break;
-    }
-
-
-    if(r) {
-      data->parser.argc = r;
-
-      r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
-      if(r < 0) {
-        ret = r;
-        break;
-      }
-    }
-    //Parse string end
-
-    //argv substitution
-    for(i = arg0; i < argend; i++) {
-      cache_free(sh->cache, sh->parser->argv[i]);
-      sh->parser->argv[i] = NULL;
-    }
-
-    //argend = 8, arg0 = 3, newargc = 4 delta = -1
-    delta = data->parser.argc - argend + arg0;
-    for(i = argend; delta < 0 && i < sh->parser->argc; i++) {
-      sh->parser->argv[i + delta] = sh->parser->argv[i];
-      sh->parser->lex[i + delta] = sh->parser->lex[i];
-      sh->parser->argv[i] = NULL;
-    }
-
-    for(i = sh->parser->argc - 1; delta > 0 && i >= argend; i--) {
-      sh->parser->argv[i + delta] = sh->parser->argv[i];
-      sh->parser->lex[i + delta] = sh->parser->lex[i];
-      sh->parser->argv[i] = NULL;
-    }
-    sh->parser->argc += delta;
-    for(i = 0; i < data->parser.argc; i++) {
-      sh->parser->argv[i + arg0] = data->parser.argv[i];
-      sh->parser->lex[i + arg0] = data->parser.lex[i];
-    }
-    //argv substitution end
-
-    //Save buffer to argv[argc] - it will be released later
-    for(i = sh->parser->argc; i < MAX_LEXER_SIZE; i++) {
-      if(sh->parser->argv[i] == NULL) {
-        sh->parser->argv[i] = buffer;
-        break;
-      }
-    }
-    buffer = NULL;
-
-  } while(0);
-
-  if(f > 0) {
-    sh->stream.ext_handler->_close(sh->stream.ext_handler->data, f);
-  }
-
-  if(data != NULL) {
-    cache_free(sh->cache, data);
-  }
-  if(buffer != NULL) {
-    cache_free(sh->cache, buffer);
-  }
-  return ret;
-}
-/*----------------------------------------------------------------------------*/
-//Handle Command substitution
-/*
-$(cmd)
-`cmd`
-*/
-static int exec0(C_SHELL *sh, int argc, char **argv)
-{
-  int i, start, end, ret = SHELL_OK;
-
-  //$(cmd)
-  while (ret == SHELL_OK) {
-
-    start = end = -1;
-
-    //Find $(
-    for(i = 0; i < argc - 1; i++) {
-      if(sh->parser->lex[i].type == LEX_STR
-         && sh->parser->lex[i].end - sh->parser->lex[i].start == 1
-         && *sh->parser->lex[i].start == '$'
-         && sh->parser->lex[i+1].type == LEX_LPAREN) {
-        start = i;
-      }
-    }
-
-    if(start == -1) {
-      break;
-    }
-
-    for(i = start; i < argc; i++) {
-      if(sh->parser->lex[i].type == LEX_RPAREN) {
-        end = i;
-        break;
-      }
-    }
-
-    if(end == -1) {
-      //No closed )
-      break;
-    }
-
-    sh->parser->arg0 = start + 2;
-    if((ret = command_substitution(sh, end - start - 2, &argv[start + 2], start, end + 1)) < 0) {
-      break;
-    }
-    argc = sh->parser->argc;
-    sh->parser->arg0 = 0;
-  }
-
-  //`cmd` (backstick-et cmd
-  while (ret == SHELL_OK) {
-
-    start = end = -1;
-
-    //Find $(
-    for(i = 0; i < argc - 1; i++) {
-      if(sh->parser->lex[i].type == LEX_BACKTICK) {
-        start = i;
-        break;
-      }
-    }
-
-    if(start == -1) {
-      break;
-    }
-
-    for(i = start + 1; i < argc; i++) {
-      if(sh->parser->lex[i].type == LEX_BACKTICK) {
-        end = i;
-        break;
-      }
-    }
-
-    if(end == -1) {
-      //No closed `
-      break;
-    }
-
-    sh->parser->arg0 = start + 1;
-    if((ret = command_substitution(sh, end - start - 1, &argv[start + 1], start, end + 1)) < 0) {
-      break;
-    }
-    argc = sh->parser->argc;
-    sh->parser->arg0 = 0;
-  }
-
-  if(ret == SHELL_OK) {
-    ret = exec1(sh, argc, argv, 0);
-  }
-  return ret;
+  return sh_exec1(sh, argc, argv, 0);
 }
 /*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/
@@ -1232,7 +737,7 @@ static int exec0(C_SHELL *sh, int argc, char **argv)
   OUT    INOUT  INOUT    IN
 */
 //Param stdout - File descriptor - where to redirect the latter in the chain output
-static int exec1(C_SHELL *sh, int argc, char **argv, int stdout)
+int sh_exec1(C_SHELL *sh, int argc, char **argv, int stdout)
 {
   int i, i0 = 0, arg0, r = SHELL_OK, f = 0;
 
@@ -1256,7 +761,7 @@ static int exec1(C_SHELL *sh, int argc, char **argv, int stdout)
 
       if(i > i0) {
         sh->parser->arg0 = arg0 + i0;
-        r = exec2(sh, i - i0, &argv[i0]);
+        r = sh_exec2(sh, i - i0, &argv[i0]);
         if(r < 0) {
           break;
         }
@@ -1275,7 +780,7 @@ static int exec1(C_SHELL *sh, int argc, char **argv, int stdout)
     }
 
     sh->parser->arg0 = arg0 + i0;
-    r = exec2(sh, i - i0, &argv[i0]);
+    r = sh_exec2(sh, i - i0, &argv[i0]);
   }
 
 
@@ -1303,7 +808,7 @@ static int exec1(C_SHELL *sh, int argc, char **argv, int stdout)
  cmd  1>> OUT 2>> ERR < IN
  cmd  2> &1
 */
-static int exec2(C_SHELL *sh, int argc, char **argv)
+int sh_exec2(C_SHELL *sh, int argc, char **argv)
 {
   int i, i0, redirect, f;
   int argc_new;
@@ -1542,294 +1047,6 @@ int sh_exec(C_SHELL *sh, int argc, char **argv)
   }
 
   return r;
-}
-/*----------------------------------------------------------------------------*/
-static const char *lex_name(LEX_CODES l)
-{
-  switch (l) {
-    case LEX_ASSIGN:    return "ASSIGN";
-    case LEX_NOT:       return "NOT";
-    case LEX_AMP:       return "AMP";
-    case LEX_VERBAR:    return "VERBAR";
-    case LEX_AND:       return "AND";
-    case LEX_OR:        return "OR";
-    case LEX_EQ:        return "EQ";
-    case LEX_NE:        return "NE";
-    case LEX_GT:        return "GT";
-    case LEX_GE:        return "GE";
-    case LEX_LT:        return "LT";
-    case LEX_LE:        return "LE";
-    case LEX_LSQB:      return "LSQB";
-    case LEX_LDSQB:     return "LDSQB";
-    case LEX_RSQB:      return "RSQB";
-    case LEX_RDSQB:     return "RDSQB";
-    case LEX_LPAREN:    return "LPAREN";
-    case LEX_RPAREN:    return "RPAREN";
-    case LEX_BACKTICK:    return "BACKTICK";
-    case LEX_STR:      return "STR";
-    case LEX_COMMENT:   return "COMMENT";
-  }
-  return "???";
-}
-/*----------------------------------------------------------------------------*/
-static void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size)
-{
-  int i;
-  const char *p;
-  shell_fprintf(sh, SHELL_STDERR, "LEX:argc:%d {\n", size);
-  for(i = 0; i < size; i++) {
-    shell_fprintf(sh, SHELL_STDERR, "%16s%8s`", lex_name(args[i].type), "");
-    for(p = args[i].start; p < args[i].end; p++) {
-      shell_fputc(sh, SHELL_STDERR, *p);
-    }
-    shell_fputc(sh, SHELL_STDERR, '\'');
-    shell_fputc(sh, SHELL_STDERR, '\n');
-  }
-  shell_fprintf(sh, SHELL_STDERR, "%10s\n", "}");
-}
-/*----------------------------------------------------------------------------*/
-static char htoc(const char **src)
-{
-  unsigned char c = 0;
-  const char *p;
-  int i;
-  p = *src;
-  for(i = 0; i < 2; i++)
-  {
-    if(*p >= 'A' && *p <= 'Z')
-    {
-      c <<= 4;
-      c |= (unsigned char)(*p - 'A' + 0xa);
-    }
-    else
-    if(*p >= 'a' && *p <= 'z')
-    {
-      c <<= 4;
-      c |= (unsigned char)(*p - 'a' + 0xa);
-    }
-    else
-    if(*p >= '0' && *p <= '9')
-    {
-      c <<= 4;
-      c |= (unsigned char)(*p - '0');
-    }
-    else
-      break;
-    p ++;
-  }
-  (*src) = p - 1;
-  return (char) c;
-}
-/*----------------------------------------------------------------------------*/
-static char otoc(const char **src)
-{
-  unsigned char c = 0;
-  int i;
-  const char *p;
-  p = *src;
-  for(i = 0; i < 3; i++)
-  {
-    if(*p >= '0' && *p <= '7')
-    {
-      c <<= 3;
-      c |= (unsigned char )(*p - '0');
-    }
-    else
-      break;
-    p ++;
-  }
-  *src = p - 1;
-  return (char) c;
-}
-/*----------------------------------------------------------------------------*/
-static unsigned var_substitution(C_SHELL *sh, const char *begin, const char *end, char *buffer, unsigned buffer_size)
-{
-  char *name = NULL;
-  const char *value;
-  unsigned size, i;
-  if(*begin == '{') {
-    begin ++;
-  }
-
-  //if(*end == '}') {
-  //  end --;
-  //}
-
-  if(end <= begin)
-    return 0;
-
-  size = end - begin;
-  name = cache_alloc(sh->cache, size + 1);
-  if(name == NULL)
-    return 0;
-  memcpy(name, begin, size);
-  name[size] = 0;
-  value = shell_get_var(sh, name);
-  cache_free(sh->cache, name);
-
-  size = strlen(value);
-  for(i = 0; i < size && i < buffer_size; i++) {
-    buffer[i] = value[i];
-  }
-  return i;
-}
-/*----------------------------------------------------------------------------*/
-static unsigned substitutions(C_SHELL *sh, const char **src, unsigned size, char *buffer, unsigned buffer_size)
-{
-  static const char delimiters[] = "}$/\\ \t+*-=><!$&()";
-  const char *p;
-  unsigned i, dst_index = 0;
-  p = *src;
-
-  for(i = 0; i < size; i++) {
-    if(strchr(delimiters, p[i]) != NULL) {
-      dst_index = var_substitution(sh, *src, &p[i], buffer, buffer_size);
-      break;
-    }
-  }
-
-  if(i >= size) {
-    dst_index = var_substitution(sh, *src, &p[size], buffer, buffer_size);
-  }
-
-  *src = &p[i];
-  return dst_index;
-}
-/*----------------------------------------------------------------------------*/
-static unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size)
-{
-  const char *p, *end;
-  unsigned i;
-  int use_vars = 1;
-
-  p = src->start;
-  end = src->end;
-  if(src->type == LEX_STR) {
-    if(*src->start == '\'') {
-      use_vars = 0;
-      p = src->start + 1;
-      end = src->end - 1;
-    }
-    else if(*src->start == '"') {
-      p = src->start + 1;
-      end = src->end - 1;
-    }
-  }
-
-
-  for(i = 0; i < buffer_size && p < end; p++) {
-    if(*p == '\\') {
-      p ++;
-      switch(*p)
-      {
-        case 'a':
-          buffer[i ++] = '\a';
-          break;
-        case 'b':
-          buffer[i ++] = '\b';
-          break;
-        case 'f':
-          buffer[i ++] = '\f';
-          break;
-        case 'n':
-          buffer[i ++] = '\n';
-          break;
-        case 'r':
-          buffer[i ++] = '\r';
-          break;
-        case 't':
-          buffer[i ++] = '\t';
-          break;
-        case 'v':
-          buffer[i ++] = '\v';
-          break;
-        case 'x':
-          p ++;
-          buffer[i ++] = htoc(&p);
-          break;
-        case '0':
-          buffer[i ++] = otoc(&p);
-          break;
-        default:
-          buffer[i ++] = *p;
-          break;
-
-      }
-      continue;
-    }
-
-    if(*p == '$' && use_vars) {
-      p ++;
-      i += substitutions(sh, &p, end - p, &buffer[i], buffer_size - i);
-      continue;
-    }
-    buffer[i ++] = *p;
-  }
-
-
-  if(i >= buffer_size)
-    i = buffer_size - 1;
-  buffer[i] = 0;
-  return i;
-
-}
-/*----------------------------------------------------------------------------*/
-static int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
-{
-  static const char empty = 0;
-  int i, ret = SHELL_OK;
-  char *buffer;
-  unsigned sz;
-
-  for(i = 0; i < size; i++) {
-    argv[i] = NULL;
-  }
-
-  buffer = (char *) cache_alloc(sh->cache, BUFFER_SIZE);
-  if(buffer == NULL) {
-    return SHELL_ERR_MALLOC;
-  }
-
-  do {
-
-    for(i = 0; i < size; i++) {
-      sz = string_prepare(sh, &args[i], buffer, BUFFER_SIZE);
-      if(sz) {
-        argv[i] = cache_alloc(sh->cache, sz + 1);
-        if(argv[i] == NULL) {
-          ret = SHELL_ERR_MALLOC;
-          break;
-        }
-        memcpy(argv[i], buffer, sz);
-        argv[i][sz] = 0;
-      }
-      else {
-        argv[i] =(char *) &empty;
-      }
-    }
-
-  } while (0);
-  cache_free(sh->cache, buffer);
-
-  if(ret != SHELL_OK) {
-    for(i = 0; i < size; i++) {
-      if(argv[i] != NULL) {
-        cache_free(sh->cache, argv[i]);
-        argv[i] = NULL;
-      }
-    }
-  }
-  return ret;
-}
-/*----------------------------------------------------------------------------*/
-static void args_print(C_SHELL *sh, int argc, char **argv)
-{
-  int i;
-  shell_fprintf(sh, SHELL_STDERR, "PARSER:argc:%d\n", argc);
-  for(i = 0; i < argc; i++) {
-    shell_fprintf(sh, SHELL_STDERR, "args[%d]:'%s'\n", i, argv[i]);
-  }
-  shell_fprintf(sh, SHELL_STDERR, "%10s\n", "}");
 }
 /*----------------------------------------------------------------------------*/
 static int context_stack(C_SHELL *sh)
