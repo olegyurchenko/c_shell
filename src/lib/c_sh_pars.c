@@ -841,7 +841,7 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
 
 
 
-      out_buffer = cache_realloc(sh->cache, out_buffer, size);
+      out_buffer = cache_realloc(sh->cache, out_buffer, size + 1);
 
       //in_buffer <-> out_buffer
       buf = in_buffer;
