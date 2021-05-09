@@ -33,19 +33,9 @@
 #include "fm_sys.h"
 #endif //STDLIB
 /*----------------------------------------------------------------------------*/
-#ifndef MALLOC
-#define MALLOC malloc
-#endif
-#ifndef FREE
-#define FREE free
-#endif
-/*----------------------------------------------------------------------------*/
 #include "c_cache.h"
-#include "loop_buff.h"
-#include "nprintf.h"
-/*----------------------------------------------------------------------------*/
-static int string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size);
 
+/**Divide source string to lexems*/
 int sh_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
 {
   int count = 0, arg_size = 0, quote = 0;
@@ -415,7 +405,7 @@ static char otoc(const char **src)
   return (char) c;
 }
 /*----------------------------------------------------------------------------*/
-int string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size)
+static int string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size)
 {
   const char *p, *end;
   unsigned i;
@@ -716,7 +706,7 @@ static const char *subst_find(const char *src, unsigned size, int what)
 /*----------------------------------------------------------------------------*/
 int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsigned dst_size)
 {
-  static const char delimiters[] = "{}/\\+*-=><!$&()\"\'`";
+  static const char delimiters[] = ";|{}/\\+*-=><!$&()\"\'`";
   char *in_buffer = NULL, *out_buffer = NULL, *buf;
   const char *p, *start, *end, *next;
   unsigned buffer_size = 16 * 1024, index;

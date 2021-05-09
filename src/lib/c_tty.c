@@ -198,6 +198,8 @@ static int mb_size(int c)
 }
 #endif
 /*----------------------------------------------------------------------------*/
+static const char delimiters[] = "[]|;{}+*-=><!$&()\"\'`";
+/*----------------------------------------------------------------------------*/
 static int tty_print(TTY* tty, int c)
 {
   int result = 0;
@@ -570,10 +572,7 @@ static int intern_tab_cb(void *arg, const char *text, unsigned size)
   if(size >= 1) {
     i = size - 1;
     while (i) {
-      if(text[i] == ' '
-         || text[i] == ';'
-         || text[i] == '|'
-         ) {
+      if( isblank(text[i]) || strchr(delimiters, text[i]) != NULL) {
         text = text + i + 1;
         size -= i + 1;
         break;
@@ -648,7 +647,7 @@ int tty_tab_completion(TTY *tty, const char *text, unsigned size, const char **k
   if(size >= 1) {
     i = size - 1;
     while (i) {
-      if(text[i] == ' ' || text[i] == ';') {
+      if(isblank(text[i]) || strchr(delimiters, text[i]) != NULL) {
         text = text + i + 1;
         size -= i + 1;
         break;
