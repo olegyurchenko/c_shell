@@ -791,6 +791,11 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
           end = p;
         } else {
           end ++;
+          next = subst_find(p, size - (p - src), '$');
+          if(next != NULL) {
+            p = next;
+            continue;
+          }
         }
         //Backstick substitution end
       }
