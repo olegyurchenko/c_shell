@@ -44,8 +44,9 @@
 #include "loop_buff.h"
 #include "nprintf.h"
 /*----------------------------------------------------------------------------*/
-/*Lexer must used in test!!!*/
-int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
+static int string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size);
+
+int sh_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
 {
   int count = 0, arg_size = 0, quote = 0;
   unsigned i;
@@ -84,7 +85,7 @@ int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsig
     if(quote)
       continue;
 
-    if(src[i] == ' ' || src[i] == '\t') {
+    if(isblank(src[i])) {
       if(arg_size) {
         dst[count].end = &src[i];
         count ++;
@@ -299,20 +300,6 @@ int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsig
       continue;
     } //(
 
-    if(src[i] == '`') {
-      if(arg_size) {
-        dst[count].end = &src[i];
-        count ++;
-        arg_size = 0;
-      }
-
-      dst[count].type = LEX_BACKTICK;
-      dst[count].start = &src[i];
-      dst[count].end = &src[i + 1];
-      count ++;
-      continue;
-    } //(
-
     if(!arg_size) {
       dst[count].type = LEX_STR;
       dst[count].start = &src[i];
@@ -352,14 +339,13 @@ static const char *lex_name(LEX_CODES l)
     case LEX_RDSQB:     return "RDSQB";
     case LEX_LPAREN:    return "LPAREN";
     case LEX_RPAREN:    return "RPAREN";
-    case LEX_BACKTICK:    return "BACKTICK";
     case LEX_STR:      return "STR";
     case LEX_COMMENT:   return "COMMENT";
   }
   return "???";
 }
 /*----------------------------------------------------------------------------*/
-void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size)
+void lex_printf(C_SHELL *sh, const LEX_ELEM *args, int size)
 {
   int i;
   const char *p;
@@ -429,18 +415,16 @@ static char otoc(const char **src)
   return (char) c;
 }
 /*----------------------------------------------------------------------------*/
-unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size)
+int string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size)
 {
   const char *p, *end;
   unsigned i;
-  int use_vars = 1;
 
   (void) sh;
   p = src->start;
   end = src->end;
   if(src->type == LEX_STR) {
     if(*src->start == '\'') {
-      use_vars = 0;
       p = src->start + 1;
       end = src->end - 1;
     }
@@ -502,7 +486,7 @@ unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned
   return i;
 }
 /*----------------------------------------------------------------------------*/
-int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
+int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
 {
   static const char empty = 0;
   int i, ret = SHELL_OK;
@@ -550,7 +534,7 @@ int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
   return ret;
 }
 /*----------------------------------------------------------------------------*/
-void args_print(C_SHELL *sh, int argc, char **argv)
+void argv_printf(C_SHELL *sh, int argc, char **argv)
 {
   int i;
   shell_fprintf(sh, SHELL_STDERR, "PARSER:argc:%d\n", argc);
@@ -614,7 +598,7 @@ static int cmd_subst(C_SHELL *sh, const char *start, const char *end, char *buff
     data->parser.argc = 0;
     sh->parser = &data->parser;
 
-    r = lexer(start, end-start, &end, data->parser.lex, MAX_LEXER_SIZE);
+    r = sh_lexer(start, end-start, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
       break;
     }
@@ -627,13 +611,13 @@ static int cmd_subst(C_SHELL *sh, const char *start, const char *end, char *buff
     if(r) {
       data->parser.argc = r;
 
-      r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
+      r = sh_make_argv(sh, data->parser.lex, data->parser.argc, data->parser.argv);
       if(r < 0) {
         break;
       }
 
       if(sh_is_pars_debug_mode(sh)) {
-        args_print(sh, data->parser.argc, data->parser.argv);
+        argv_printf(sh, data->parser.argc, data->parser.argv);
       }
 
 
@@ -730,7 +714,7 @@ static const char *subst_find(const char *src, unsigned size, int what)
   return NULL;
 }
 /*----------------------------------------------------------------------------*/
-int make_substitutions(C_SHELL *sh, const char *src, unsigned size, char *dst, unsigned dst_size)
+int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsigned dst_size)
 {
   static const char delimiters[] = "{}/\\+*-=><!$&()\"\'`";
   char *in_buffer = NULL, *out_buffer = NULL, *buf;

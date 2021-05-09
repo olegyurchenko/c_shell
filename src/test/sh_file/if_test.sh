@@ -1,6 +1,6 @@
 #__DEBUG__ = 1
 
-if true ; then echo "Test1 Ok" ; fi ; echo 1111
+if true ; then echo "Test1 Ok" ; fi ; echo 1111 |
 if false
 then echo "Test2 failed"
 else echo "Test2 Ok"

@@ -41,7 +41,6 @@ typedef enum {
   , LEX_RDSQB //]
   , LEX_LPAREN //(
   , LEX_RPAREN //)
-  , LEX_BACKTICK //`
   , LEX_STR //string
   , LEX_COMMENT //#comm
 } LEX_CODES;
@@ -158,9 +157,12 @@ extern "C" {
 /*----------------------------------------------------------------------------*/
 int sh_exec(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
-int sh_exec0(C_SHELL *sh, int argc, char **argv);
-int sh_exec1(C_SHELL *sh, int argc, char **argv, int stdout);
-int sh_exec2(C_SHELL *sh, int argc, char **argv);
+/**Handle input/output FIFO
+Param stdout - File descriptor - where to redirect the latter in the chain output
+*/
+int sh_exec1(C_SHELL *sh, int argc, char **argv, int stdout); //==> sh_exec2() ==> sh_exec()
+/*Handle STDIN/STDOUT/STDERR redirect*/
+int sh_exec2(C_SHELL *sh, int argc, char **argv); // ==> sh_exec()
 /*----------------------------------------------------------------------------*/
 
 

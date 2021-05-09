@@ -543,7 +543,8 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     data->parser.arg0 = 0;
     data->parser.argc = 0;
 
-    r = lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
+    //Lexer only to find end of command
+    r = sh_lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
       break;
     }
@@ -567,35 +568,33 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
         break;
       }
 
-      r = make_substitutions(sh, data->src_start, data->src_end - data->src_start, buffer, buffer_size);
+      r = sh_make_substs(sh, data->src_start, data->src_end - data->src_start, buffer, buffer_size);
       if(r < 0) {
         break;
       }
       size = r;
       buffer = cache_realloc(sh->cache, buffer, size + 1);
-      r = lexer(buffer, size, &p, data->parser.lex, MAX_LEXER_SIZE);
+      r = sh_lexer(buffer, size, &p, data->parser.lex, MAX_LEXER_SIZE);
       if(r < 0) {
         break;
       }
     }
 
 
-
-
     if(r) {
       data->parser.argc = r;
 
       if(sh_is_lex_debug_mode(sh)) {
-        lex_print(sh, data->parser.lex, data->parser.argc);
+        lex_printf(sh, data->parser.lex, data->parser.argc);
       }
 
-      r = args_prepare(sh, data->parser.lex, data->parser.argc, data->parser.argv);
+      r = sh_make_argv(sh, data->parser.lex, data->parser.argc, data->parser.argv);
       if(r < 0) {
         break;
       }
 
       if(sh_is_pars_debug_mode(sh)) {
-        args_print(sh, data->parser.argc, data->parser.argv);
+        argv_printf(sh, data->parser.argc, data->parser.argv);
       }
 
       if(!from_cache) {
@@ -603,7 +602,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
       }
 
       sh->parser = &data->parser;
-      r = sh_exec0(sh, data->parser.argc, data->parser.argv);
+      r = sh_exec1(sh, data->parser.argc, data->parser.argv, 0);
       sh->parser = NULL;
 
       for(i = 0; i < MAX_LEXER_SIZE; i++) {
@@ -724,11 +723,6 @@ void sh_set_false_condition(C_SHELL *sh)
 int sh_get_condition(C_SHELL *sh)
 {
   return sh_current_context(sh)->condition ? 1 : 0;
-}
-/*----------------------------------------------------------------------------*/
-int sh_exec0(C_SHELL *sh, int argc, char **argv)
-{
-  return sh_exec1(sh, argc, argv, 0);
 }
 /*----------------------------------------------------------------------------*/
 /**Handle input/output FIFO*/

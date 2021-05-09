@@ -20,12 +20,16 @@
 extern "C" {
 #endif /*__cplusplus*/
 
-int lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
-void lex_print(C_SHELL *sh, const LEX_ELEM *args, int size);
-unsigned string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsigned buffer_size);
-int args_prepare(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv);
-void args_print(C_SHELL *sh, int argc, char **argv);
-int make_substitutions(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsigned buffer_size);
+/**Divide source string to lexems*/
+int sh_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
+/**Lexems printf*/
+void lex_printf(C_SHELL *sh, const LEX_ELEM *args, int size);
+/**Make *argv[] from lexems*/
+int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv);
+/**Print arggumsens *argv[]*/
+void argv_printf(C_SHELL *sh, int argc, char **argv);
+/**Make substitutions: $xxx, $(cmd) ${xxx} `xx`*/
+int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsigned buffer_size);
 
 #ifdef __cplusplus
 } //extern "C"
