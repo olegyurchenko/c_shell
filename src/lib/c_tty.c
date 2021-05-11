@@ -43,6 +43,7 @@
 #include <ctype.h>
 #else //STDLIB
 #include "fm_sys.h"
+static int isblank(int c) {return c == ' ' || c == '\t' || c == '\r' || c == '\n';}
 #endif //STDLIB
 /*----------------------------------------------------------------------------*/
 #ifndef MALLOC

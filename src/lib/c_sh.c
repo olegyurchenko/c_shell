@@ -731,7 +731,7 @@ int sh_get_condition(C_SHELL *sh)
   OUT    INOUT  INOUT    IN
 */
 //Param stdout - File descriptor - where to redirect the latter in the chain output
-int sh_exec1(C_SHELL *sh, int argc, char **argv, int stdout)
+int sh_exec1(C_SHELL *sh, int argc, char **argv, int f_stdout)
 {
   int i, i0 = 0, arg0, r = SHELL_OK, f = 0;
 
@@ -770,7 +770,7 @@ int sh_exec1(C_SHELL *sh, int argc, char **argv, int stdout)
         sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
         sh->stream.f[SHELL_STDIN] = sh->stream.f[SHELL_STDOUT];
       }
-      sh->stream.f[SHELL_STDOUT] = stdout;
+      sh->stream.f[SHELL_STDOUT] = f_stdout;
     }
 
     sh->parser->arg0 = arg0 + i0;
