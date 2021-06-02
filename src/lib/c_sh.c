@@ -782,7 +782,7 @@ int sh_exec1(C_SHELL *sh, int argc, char **argv, int f_stdout)
     if(sh->stream.f[SHELL_STDIN] > 0) {
       sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDIN]);
     }
-    if(sh->stream.f[SHELL_STDOUT] > 0 && sh->stream.f[SHELL_STDOUT] != stdout) {
+    if(sh->stream.f[SHELL_STDOUT] > 0 && sh->stream.f[SHELL_STDOUT] != f_stdout) {
       sh->stream.ext_handler->_close(sh->stream.ext_handler->data, sh->stream.f[SHELL_STDOUT]);
     }
     if(sh->stream.f[SHELL_STDERR] > 0) {

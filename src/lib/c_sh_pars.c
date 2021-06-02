@@ -31,10 +31,13 @@
 #include <ctype.h>
 #else //STDLIB
 #include "fm_sys.h"
-static int isblank(int c) {return c == ' ' || c == '\t' || c == '\r' || c == '\n';}
 #endif //STDLIB
 /*----------------------------------------------------------------------------*/
 #include "c_cache.h"
+
+#if !defined(STDLIB) || defined(__BORLANDC__)
+static int isblank(int c) {return c == ' ' || c == '\t' || c == '\r' || c == '\n';}
+#endif
 
 /**Divide source string to lexems*/
 int sh_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
