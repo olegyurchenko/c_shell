@@ -98,7 +98,7 @@ int step_cb(void *arg, int argc, char **argv)
   return SHELL_OK;
 }
 
-static int exec_files(void *arg, int argc, char **argv)
+static int exec_file(void *arg, int argc, char **argv)
 {
   int i;
   int ret = SHELL_OK;
@@ -106,8 +106,12 @@ static int exec_files(void *arg, int argc, char **argv)
 
   data = (TEST_SHELL_DATA *) arg;
 
-  for(i = 1; i < argc; i++)
-  {
+  if(argc < 1) {
+    return SHELL_ERR_INVALID_ARG;
+  }
+
+
+
     FILE *f;
 
     int line = 0, debug = 0;
@@ -118,6 +122,11 @@ static int exec_files(void *arg, int argc, char **argv)
     {
       shell_printf(data->sh, "Error open file '%s'\n", argv[i]);
       return SHELL_ERR_INVALID_ARG;
+    }
+
+    for(i = 0; i < argc - 1; i++) {
+      snprintf(buffer, sizeof(buffer), "$%d", i);
+      shell_set_var(data->sh, buffer, argv[i + 1]);
     }
 
     ret = 0;
@@ -138,30 +147,20 @@ static int exec_files(void *arg, int argc, char **argv)
     }
 
     fclose(f);
-    if(ret < 0)
-      break;
-  }
-  return ret;
+    return ret;
 }
 
 int shell_exec(void *arg, int argc, char **argv)
 {
-  int found = 0;
-
 
   if(argc >= 1) {
-    if(!strcmp(argv[0], "exit") || !strcmp(argv[0], "quit")) {
-      terminated = 1;
-      found = 1;
-    }
-
     if(!strcmp(argv[0], ".")) {
-      return exec_files(arg, argc, argv);
+      return exec_file(arg, argc, argv);
     }
   }
 
 
-  return found ? SHELL_OK : ts_exec(arg, argc, argv);
+  return ts_exec(arg, argc, argv);
 }
 
 int main(int argc, char ** argv)
@@ -186,7 +185,7 @@ int main(int argc, char ** argv)
   ts_init(&data);
 
   if(argc > 1) {
-    return exec_files(&data, argc, argv);
+    return exec_file(&data, argc - 1, &argv[1]);
   }
 
   if (!console_isatty()) {

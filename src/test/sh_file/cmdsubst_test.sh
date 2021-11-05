@@ -1,3 +1,5 @@
+echo $0
+
 x=""
 x="" x=$(echo 1111)
  echo -n "Test1 "
