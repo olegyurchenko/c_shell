@@ -21,11 +21,13 @@ extern "C" {
 #endif /*__cplusplus*/
 
 /**Divide source string to lexems*/
-int sh_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
+int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
+/**Divide source string to lexems for test*/
+int test_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size);
 /**Lexems printf*/
 void lex_printf(C_SHELL *sh, const LEX_ELEM *args, int size);
 /**Make *argv[] from lexems*/
-int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv);
+int sh_make_argv(C_SHELL *sh, C_SHELL_PARSER *parser);
 /**Print arggumsens *argv[]*/
 void argv_printf(C_SHELL *sh, int argc, char **argv);
 /**Make substitutions: $xxx, $(cmd) ${xxx} `xx`*/

@@ -367,6 +367,7 @@ int sh_for(C_SHELL *sh, int argc, char **argv)
     c->op_code = OP_IF;
     c->is_loop = 1;
     c->should_store_cache = 1;
+    c->for_index  = 0;
   }
   else
   {

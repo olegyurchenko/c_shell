@@ -40,7 +40,277 @@ static int isblank(int c) {return c == ' ' || c == '\t' || c == '\r' || c == '\n
 #endif
 
 /**Divide source string to lexems*/
-int sh_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
+int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
+{
+  int count = 0, arg_size = 0, quote = 0, lparen = 0;
+  unsigned i;
+  for(i = 0; i < size && count < (int) lex_size; i++) {
+
+    if(src[i] == '\\') {
+      i ++;
+      continue;
+    }
+
+    if(src[i] == '"' || src[i] == '\'' || src[i] == '`') {
+      if(!quote) {
+        /*
+        if(arg_size) {
+          dst[count].end = &src[i];
+          count ++;
+          arg_size = 0;
+        }
+        */
+        quote = src[i];
+
+        if(!arg_size) {
+          dst[count].start = &src[i];
+        }
+
+        dst[count].end = &src[i];
+        dst[count].type = LEX_STR;
+        arg_size ++;
+      }
+      else
+        if(src[i] == quote) {
+          quote = 0;
+/*
+          if(arg_size) {
+            dst[count].end = &src[i + 1];
+            count ++;
+            arg_size = 0;
+          }
+*/
+        }
+      continue;
+    }
+
+    if(quote)
+      continue;
+
+    if(isblank(src[i]) && lparen <= 0) {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+      continue;
+    }
+
+    if(src[i] == ';' || src[i] == '\r' || src[i] == '\n') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+      i ++;
+      break;
+    }
+
+    if(src[i] == '#') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_COMMENT;
+      dst[count].start = &src[i];
+      i = size;
+      dst[count].end = &src[i];
+      count ++;
+      arg_size = 0;
+      break;
+    }
+
+    if(src[i] == '=') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_ASSIGN;
+      dst[count].start = &src[i];
+      if(src[i + 1] == '=') {
+        dst[count].type = LEX_EQ;
+        i ++;
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //=
+
+    if(src[i] == '>') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_GT;
+      dst[count].start = &src[i];
+      if(src[i + 1] == '=') {
+        i ++;
+        dst[count].type = LEX_GE;
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //> >=
+
+    if(src[i] == '<') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_LT;
+      dst[count].start = &src[i];
+      if(src[i + 1] == '=') {
+        i ++;
+        dst[count].type = LEX_LE;
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //< <=
+
+    if(src[i] == '&') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_AMP;
+      dst[count].start = &src[i];
+      if(src[i + 1] == '&') {
+        i ++;
+        dst[count].type = LEX_AND;
+        if(count) {
+          i --;
+          break;
+        }
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //& &&
+
+    if(src[i] == '|') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_VERBAR;
+      dst[count].start = &src[i];
+      if(src[i + 1] == '|') {
+        i ++;
+        dst[count].type = LEX_OR;
+        if(count) {
+          i --;
+          break;
+        }
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //& &&
+
+    if(src[i] == '!') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_NOT;
+      dst[count].start = &src[i];
+      if(src[i + 1] == '=') {
+        dst[count].type = LEX_NE;
+        i ++;
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //! !=
+
+    if(src[i] == '[') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_LSQB;
+      dst[count].start = &src[i];
+      if(src[i + 1] == '[') {
+        i ++;
+        dst[count].type = LEX_LDSQB;
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //[ [[
+
+    if(src[i] == ']') {
+      if(arg_size) {
+        dst[count].end = &src[i];
+        count ++;
+        arg_size = 0;
+      }
+
+      dst[count].type = LEX_RSQB;
+      dst[count].start = &src[i];
+      if(src[i + 1] == ']') {
+        i ++;
+        dst[count].type = LEX_RDSQB;
+      }
+      dst[count].end = &src[i + 1];
+      count ++;
+      continue;
+    } //] ]]
+
+    if(src[i] == '(') {
+      lparen ++;
+    } //(
+
+    if(src[i] == ')') {
+      if(lparen > 0) {
+        lparen --;
+        if(!lparen) {
+          if(arg_size) {
+            dst[count].end = &src[i + 1];
+            count ++;
+            arg_size = 0;
+          }
+          continue;
+        }
+      }
+    } //(
+
+    if(!arg_size) {
+      dst[count].type = LEX_STR;
+      dst[count].start = &src[i];
+      dst[count].end = &src[i];
+      arg_size ++;
+    }
+  }
+
+  if(arg_size) {
+    dst[count].end = &src[i];
+    count ++;
+  }
+
+  *end = &src[i];
+  return count;
+}
+/*----------------------------------------------------------------------------*/
+/**Divide source string to lexems*/
+int test_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, unsigned lex_size)
 {
   int count = 0, arg_size = 0, quote = 0;
   unsigned i;
@@ -480,16 +750,24 @@ static int string_prepare(C_SHELL *sh, const LEX_ELEM *src, char *buffer, unsign
   return i;
 }
 /*----------------------------------------------------------------------------*/
-int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
+int sh_make_argv(C_SHELL *sh, C_SHELL_PARSER *parser)
 {
+  typedef struct {
+    C_SHELL_PARSER parser;
+
+  } sh_make_argv_t;
+
+  sh_make_argv_t *data = NULL;
+
   static const char empty = 0;
-  int i, ret = SHELL_OK;
+  int i, j, ret = SHELL_OK;
   LEX_ELEM lex;
   char *buffer1, *buffer2 = NULL;
+  const char *end, *p;
   unsigned sz;
 
-  for(i = 0; i < size; i++) {
-    argv[i] = NULL;
+  for(i = 0; i < parser->argc; i++) {
+    parser->argv[i] = NULL;
   }
 
   buffer1 = (char *) cache_alloc(sh->cache, BUFFER_SIZE);
@@ -504,31 +782,87 @@ int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
       break;
     }
 
-    for(i = 0; i < size; i++) {
-      lex = args[i];
+    for(i = 0; i < parser->argc; i++) {
+      lex = parser->lex[i];
       if(lex.type == LEX_STR && *lex.start != '\'') {
         ret = sh_make_substs(sh, lex.start, lex.end - lex.start, buffer1, BUFFER_SIZE);
         if(ret < 0) {
           break;
         }
-        lex.start = buffer1;
-        lex.end = lex.start + ret;
+        sz = ret;
         ret = SHELL_OK;
+        if(*parser->lex[i].start != '"'
+           && (lex.end - lex.start != sz || memcmp(lex.start, buffer1, sz)) ) {
+          //Split argv[i]
+          data = (sh_make_argv_t *) cache_alloc(sh->cache, sizeof(sh_make_argv_t));
+          if(data == NULL) {
+            ret = SHELL_ERR_MALLOC;
+            break;
+          }
+          memset(data, 0, sizeof(sh_make_argv_t));
+
+          do {
+            data->parser.arg0 = 0;
+            data->parser.argc = 0;
+            ret = cmdline_lexer(buffer1, sz, &end, data->parser.lex, MAX_LEXER_SIZE);
+            if(ret < 0) {
+              break;
+            }
+            j = 0; //For i += j;
+            if(ret < 2) {
+              ret = SHELL_OK;
+              break;
+            }
+            data->parser.argc = ret;
+            ret = sh_make_argv(sh, &data->parser);
+            if(SHELL_OK != ret) {
+              break;
+            }
+
+            for(j = 0; j < data->parser.argc; j++) {
+              parser->argv[i + j] = data->parser.argv[j];
+              data->parser.argv[j] = NULL;
+              lex = parser->lex[i + j + 1];
+
+              //INvalid lex ?
+              parser->lex[i + j] = data->parser.lex[j];
+              parser->lex[i + j].start = NULL;
+              parser->lex[i + j].end = NULL;
+
+              parser->lex[i + j + data->parser.argc + 1] = lex;
+            }
+            parser->argc += data->parser.argc;
+          } while(0);
+
+          cache_free(sh->cache, data);
+          if(SHELL_OK != ret) {
+            break;
+          }
+
+          i += j;
+          if(j > 1) {
+            continue;
+          }
+          //Split argv[i]
+        }
+
+        lex.start = buffer1;
+        lex.end = lex.start + sz;
         sz = string_prepare(sh, &lex, buffer2, BUFFER_SIZE);
       } else {
-        sz = string_prepare(sh, &args[i], buffer2, BUFFER_SIZE);
+        sz = string_prepare(sh, &parser->lex[i], buffer2, BUFFER_SIZE);
       }
       if(sz) {
-        argv[i] = cache_alloc(sh->cache, sz + 1);
-        if(argv[i] == NULL) {
+        parser->argv[i] = cache_alloc(sh->cache, sz + 1);
+        if(parser->argv[i] == NULL) {
           ret = SHELL_ERR_MALLOC;
           break;
         }
-        memcpy(argv[i], buffer2, sz);
-        argv[i][sz] = 0;
+        memcpy(parser->argv[i], buffer2, sz);
+        parser->argv[i][sz] = 0;
       }
       else {
-        argv[i] =(char *) &empty;
+        parser->argv[i] =(char *) &empty;
       }
     }
 
@@ -539,10 +873,10 @@ int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
   }
 
   if(ret != SHELL_OK) {
-    for(i = 0; i < size; i++) {
-      if(argv[i] != NULL) {
-        cache_free(sh->cache, argv[i]);
-        argv[i] = NULL;
+    for(i = 0; i < parser->argc; i++) {
+      if(parser->argv[i] != NULL) {
+        cache_free(sh->cache, parser->argv[i]);
+        parser->argv[i] = NULL;
       }
     }
   }
@@ -613,7 +947,7 @@ static int cmd_subst(C_SHELL *sh, const char *start, const char *end, char *buff
     data->parser.argc = 0;
     sh->parser = &data->parser;
 
-    r = sh_lexer(start, end-start, &end, data->parser.lex, MAX_LEXER_SIZE);
+    r = cmdline_lexer(start, end-start, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
       break;
     }
@@ -626,7 +960,7 @@ static int cmd_subst(C_SHELL *sh, const char *start, const char *end, char *buff
     if(r) {
       data->parser.argc = r;
 
-      r = sh_make_argv(sh, data->parser.lex, data->parser.argc, data->parser.argv);
+      r = sh_make_argv(sh, &data->parser);
       if(r < 0) {
         break;
       }

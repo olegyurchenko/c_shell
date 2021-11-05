@@ -544,7 +544,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
     data->parser.argc = 0;
 
     //Lexer only to find end of command
-    r = sh_lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
+    r = cmdline_lexer(str, size, &end, data->parser.lex, MAX_LEXER_SIZE);
     if(r < 0) {
       break;
     }
@@ -589,7 +589,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
         lex_printf(sh, data->parser.lex, data->parser.argc);
       }
 
-      r = sh_make_argv(sh, data->parser.lex, data->parser.argc, data->parser.argv);
+      r = sh_make_argv(sh, &data->parser);
       if(r < 0) {
         break;
       }
