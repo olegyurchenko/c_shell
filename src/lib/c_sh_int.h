@@ -19,7 +19,7 @@
 /*----------------------------------------------------------------------------*/
 #define VAR_NAME_LENGTH 16
 #define MAX_LEXER_SIZE 256
-#define DEFAULT_CACHE_SIZE 64*1024
+#define DEFAULT_CACHE_SIZE 256*1024
 #define BUFFER_SIZE 1024
 /*----------------------------------------------------------------------------*/
 typedef enum {

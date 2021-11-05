@@ -484,29 +484,47 @@ int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
 {
   static const char empty = 0;
   int i, ret = SHELL_OK;
-  char *buffer;
+  LEX_ELEM lex;
+  char *buffer1, *buffer2 = NULL;
   unsigned sz;
 
   for(i = 0; i < size; i++) {
     argv[i] = NULL;
   }
 
-  buffer = (char *) cache_alloc(sh->cache, BUFFER_SIZE);
-  if(buffer == NULL) {
+  buffer1 = (char *) cache_alloc(sh->cache, BUFFER_SIZE);
+  if(buffer1 == NULL) {
     return SHELL_ERR_MALLOC;
   }
 
   do {
+    buffer2 = (char *) cache_alloc(sh->cache, BUFFER_SIZE);
+    if(buffer2 == NULL) {
+      ret = SHELL_ERR_MALLOC;
+      break;
+    }
 
     for(i = 0; i < size; i++) {
-      sz = string_prepare(sh, &args[i], buffer, BUFFER_SIZE);
+      lex = args[i];
+      if(lex.type == LEX_STR && *lex.start != '\'') {
+        ret = sh_make_substs(sh, lex.start, lex.end - lex.start, buffer1, BUFFER_SIZE);
+        if(ret < 0) {
+          break;
+        }
+        lex.start = buffer1;
+        lex.end = lex.start + ret;
+        ret = SHELL_OK;
+        sz = string_prepare(sh, &lex, buffer2, BUFFER_SIZE);
+      } else {
+        sz = string_prepare(sh, &args[i], buffer2, BUFFER_SIZE);
+      }
       if(sz) {
         argv[i] = cache_alloc(sh->cache, sz + 1);
         if(argv[i] == NULL) {
           ret = SHELL_ERR_MALLOC;
           break;
         }
-        memcpy(argv[i], buffer, sz);
+        memcpy(argv[i], buffer2, sz);
         argv[i][sz] = 0;
       }
       else {
@@ -515,7 +533,10 @@ int sh_make_argv(C_SHELL *sh, const LEX_ELEM *args, int size, char **argv)
     }
 
   } while (0);
-  cache_free(sh->cache, buffer);
+  cache_free(sh->cache, buffer1);
+  if(buffer2 != NULL) {
+    cache_free(sh->cache, buffer2);
+  }
 
   if(ret != SHELL_OK) {
     for(i = 0; i < size; i++) {

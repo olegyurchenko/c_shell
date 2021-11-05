@@ -567,7 +567,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
         r = SHELL_ERR_MALLOC;
         break;
       }
-
+/*
       r = sh_make_substs(sh, data->src_start, data->src_end - data->src_start, buffer, buffer_size);
       if(r < 0) {
         break;
@@ -578,6 +578,7 @@ int exec_str(C_SHELL *sh, const char *str, int from_cache)
       if(r < 0) {
         break;
       }
+*/
     }
 
 

@@ -1554,11 +1554,13 @@ void setup_console(void)
 
   term = saved_term;
 
+
   term.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
   term.c_oflag &= ~(OPOST);
   term.c_cflag |= CS8;
   term.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
-  term.c_cc[VMIN] = 0;    term.c_cc[VTIME] = 1;
+  term.c_cc[VMIN] = 1;
+  term.c_cc[VTIME] = 1;
 
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &term) < 0) {
     perror("tcsetattr");
