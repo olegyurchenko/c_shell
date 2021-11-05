@@ -28,3 +28,7 @@ x="123` echo 45`"
 echo -n "Test5 "
 if [ "$x" == "12345" ] ; then echo Ok ; else echo Failed ; fi
 
+
+echo -n "Test6 "
+x="Quote test \"111\""
+if [ "$x" == "Quote test \"111\"" ] ; then echo Ok ; else echo Failed ; fi
