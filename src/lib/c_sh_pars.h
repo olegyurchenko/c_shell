@@ -32,6 +32,8 @@ int sh_make_argv(C_SHELL *sh, C_SHELL_PARSER *parser);
 void argv_printf(C_SHELL *sh, int argc, char **argv);
 /**Make substitutions: $xxx, $(cmd) ${xxx} `xx`*/
 int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsigned buffer_size);
+/** String argument representation: 123=>123 11 22 => '11 22' */
+int to_str(const char *src, char *dst, unsigned buffer_size);
 
 #ifdef __cplusplus
 } //extern "C"

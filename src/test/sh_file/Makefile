@@ -1,10 +1,13 @@
 CC=gcc
-CFLAGS=-I../../lib -D UNIX -D LINUX
+CFLAGS=-I../../lib -D UNIX_CONSOLE -D UNIX -D LINUX
 LDFLAGS=
 
-EXECUTABLE=sh_file
+EXECUTABLE=shell
 
-SOURCES= main.c \
+SOURCES= ../shell/main.c \
+../shell/test_shell.c \
+../../lib/loop_buff.c \
+../../lib/c_tty.c \
 ../../lib/c_cache.c \
 ../../lib/c_sh.c \
 ../../lib/c_sh_embed.c \
@@ -19,6 +22,9 @@ $(EXECUTABLE): $(OBJECTS)
 	$(CC) $(CFLAGS) $(OBJECTS) -o $(EXECUTABLE)
 
 %.o: ../../lib/%.c
+	$(CC) -c $(CFLAGS) -o $@ $<
+
+%.o: ../shell/%.c
 	$(CC) -c $(CFLAGS) -o $@ $<
 
 clean:

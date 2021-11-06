@@ -1,3 +1,4 @@
+echo $0
 . if_test.sh
 . logic_test.sh
 . loop_test.sh

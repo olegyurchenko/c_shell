@@ -1,3 +1,4 @@
+echo $0
 __DEBUG__=1
 x=0
 while [ "$x" -ne 1111 ]; do

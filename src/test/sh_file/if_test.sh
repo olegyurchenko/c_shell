@@ -1,3 +1,4 @@
+echo $0
 #__DEBUG__ = 1
 
 if true ; then echo "Test1 Ok" ; fi ; echo 1111 |

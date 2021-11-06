@@ -14,6 +14,7 @@
 /*----------------------------------------------------------------------------*/
 #include "c_sh_embed.h"
 #include "c_sh_int.h"
+#include "c_sh_pars.h"
 /*----------------------------------------------------------------------------*/
 #undef STDLIB
 #if !defined(NOSTDLIB)
@@ -539,8 +540,7 @@ int sh_continue(C_SHELL *sh, int argc, char **argv)
 /*----------------------------------------------------------------------------*/
 int sh_echo(C_SHELL *sh, int argc, char **argv)
 {
-  int i = 1, endl, first = 1;
-  const char *p;
+  int i = 1, endl;
 
   (void) sh;
   (void) argc;
@@ -556,18 +556,10 @@ int sh_echo(C_SHELL *sh, int argc, char **argv)
 
 
   for(; i < argc; i++) {
-    if(!first) {
-      if(sh->parser != NULL && sh->parser->arg0 + i - 1 < sh->parser->argc) {
-        p = sh->parser->lex[sh->parser->arg0 + i - 1].end;
-        while(p < sh->parser->lex[sh->parser->arg0 + i].start) {
-          shell_putc(sh, *p);
-          p ++;
-        }
-
-      }
-    }
     shell_puts(sh, argv[i]);
-    first = 0;
+    if(i < argc - 1) {
+      shell_puts(sh, " ");
+    }
   }
 
   if(endl)
@@ -1003,10 +995,12 @@ int sh_stream_write(void *data, int f, const void* buf, unsigned size)
 /*----------------------------------------------------------------------------*/
 typedef struct {
   C_SHELL *sh;
-  int arg0;
-  int argc;
-  LEX_ELEM lex[MAX_LEXER_SIZE];
-  char *argv[MAX_LEXER_SIZE];
+  C_SHELL_PARSER parser;
+  char buffer[16 * 1024];
+  //int arg0;
+  //int argc;
+  //LEX_ELEM lex[MAX_LEXER_SIZE];
+  //char *argv[MAX_LEXER_SIZE];
 } TEST_DATA;
 /*----------------------------------------------------------------------------*/
 static int error_msg(TEST_DATA *data, const char *fmt, ...)
@@ -1035,10 +1029,10 @@ static void debug_msg(TEST_DATA *data, const char *op)
   if(!sh_is_debug_mode(data->sh))
     return;
   shell_fprintf(data->sh, SHELL_STDERR, "<<op:%s:", op == NULL ? "" : op);
-  shell_fprintf(data->sh, SHELL_STDERR, "arg0:%d:argc:%d", data->arg0, data->argc);
+  shell_fprintf(data->sh, SHELL_STDERR, "arg0:%d:argc:%d", data->parser.arg0, data->parser.argc);
 
-  for(i = data->arg0; i < data->argc; i++) {
-    shell_fprintf(data->sh, SHELL_STDERR, ":%s", data->argv[i]);
+  for(i = data->parser.arg0; i < data->parser.argc; i++) {
+    shell_fprintf(data->sh, SHELL_STDERR, ":%s", data->parser.argv[i]);
   }
   shell_fprintf(data->sh, SHELL_STDERR, ">>\n");
 }
@@ -1075,7 +1069,8 @@ enum {
 /*----------------------------------------------------------------------------*/
 static int intern_test(C_SHELL *sh, int argc, char **argv)
 {
-  int res, i;
+  int res, i, sz;
+  const char *p;
   TEST_DATA *data;
 
 
@@ -1092,84 +1087,103 @@ static int intern_test(C_SHELL *sh, int argc, char **argv)
 
   do {
     data->sh = sh;
-    data->argc = argc;
-    data->arg0 = 0;
 
-    for(i = 0; i < sh->parser->argc - sh->parser->arg0; i++) {
-      data->lex[i] = sh->parser->lex[i + sh->parser->arg0];
-      data->argv[i] = sh->parser->argv[i + sh->parser->arg0];
+    data->parser.argc = 0;
+    data->parser.arg0 = 0;
 
-      if(data->lex[i].type == LEX_STR) {
+    //Reparse string
+    sz = 0;
+    for(i = 0; i < argc && sz < (int) sizeof(data->buffer) - 1; i++) {
+      sz += to_str(argv[i], &data->buffer[sz], sizeof(data->buffer) - sz);
+      data->buffer[sz ++] = ' ';
+    }
+    data->buffer[sz] = '\0';
+
+    res = test_lexer(data->buffer, sz, &p, data->parser.lex, MAX_LEXER_SIZE);
+    if(res < 0) {
+      break;
+    }
+    data->parser.argc = res;
+
+    res = sh_make_argv(sh, &data->parser);
+    if(SHELL_OK != res) {
+      break;
+    }
+
+    for(i = 0; i < data->parser.argc; i++) {
+      if(data->parser.lex[i].type == LEX_STR) {
         //Addition parse for short option
-        if(!strcmp(data->argv[i], "-a")) {
-          data->lex[i].type = LEX_AND;
+        if(!strcmp(data->parser.argv[i], "-a")) {
+          data->parser.lex[i].type = LEX_AND;
           continue;
         }
-        if(!strcmp(data->argv[i], "-o")) {
-          data->lex[i].type = LEX_OR;
+        if(!strcmp(data->parser.argv[i], "-o")) {
+          data->parser.lex[i].type = LEX_OR;
           continue;
         }
-        if(!strcmp(data->argv[i], "-eq")) {
-          data->lex[i].type = LEX_IEQ;
+        if(!strcmp(data->parser.argv[i], "-eq")) {
+          data->parser.lex[i].type = LEX_IEQ;
           continue;
         }
-        if(!strcmp(data->argv[i], "-ne")) {
-          data->lex[i].type = LEX_INE;
+        if(!strcmp(data->parser.argv[i], "-ne")) {
+          data->parser.lex[i].type = LEX_INE;
           continue;
         }
-        if(!strcmp(data->argv[i], "-gt")) {
-          data->lex[i].type = LEX_IGT;
+        if(!strcmp(data->parser.argv[i], "-gt")) {
+          data->parser.lex[i].type = LEX_IGT;
           continue;
         }
-        if(!strcmp(data->argv[i], "-ge")) {
-          data->lex[i].type = LEX_IGE;
+        if(!strcmp(data->parser.argv[i], "-ge")) {
+          data->parser.lex[i].type = LEX_IGE;
           continue;
         }
-        if(!strcmp(data->argv[i], "-lt")) {
-          data->lex[i].type = LEX_ILT;
+        if(!strcmp(data->parser.argv[i], "-lt")) {
+          data->parser.lex[i].type = LEX_ILT;
           continue;
         }
-        if(!strcmp(data->argv[i], "-le")) {
-          data->lex[i].type = LEX_ILE;
+        if(!strcmp(data->parser.argv[i], "-le")) {
+          data->parser.lex[i].type = LEX_ILE;
           continue;
         }
       }
     }
 
     //Addition string handle: skeep spaces
-    for(i = 0; i < data->argc; i++) {
-      if(data->lex[i].type == LEX_STR) {
-        while(data->argv[i][0] == ' ') {
-          data->argv[i] ++;
+    /*
+    for(i = 0; i < data->parser.argc; i++) {
+      if(data->parser.lex[i].type == LEX_STR) {
+        while(data->parser.argv[i][0] == ' ') {
+          data->parser.argv[i] ++;
         }
       }
     }
+    */
 
     debug_msg(data, "test");
-    if(data->lex[0].type == LEX_LSQB) {
-      data->arg0 ++;
-      data->argc --;
-      if(data->lex[data->argc].type != LEX_RSQB) {
+    if(data->parser.lex[0].type == LEX_LSQB) {
+      data->parser.arg0 ++;
+      data->parser.argc --;
+      if(data->parser.lex[data->parser.argc].type != LEX_RSQB) {
         error_msg(data, "missing ]");
         res = 2;
         break;
       }
     }
     else
-    if(data->lex[0].type == LEX_LDSQB) {
-      data->argc --;
-      data->arg0 ++;
-      if(data->lex[data->argc].type != LEX_RDSQB) {
+    if(data->parser.lex[0].type == LEX_LDSQB) {
+      data->parser.argc --;
+      data->parser.arg0 ++;
+      if(data->parser.lex[data->parser.argc].type != LEX_RDSQB) {
         error_msg(data, "missing ]]");
         res = 2;
         break;
       }
     }
     else {
-      data->arg0 ++;
+      data->parser.arg0 ++;
     }
 
-    if (data->argc <= data->arg0) {
+    if (data->parser.argc <= data->parser.arg0) {
       res = 1;
       break;
     }
@@ -1177,6 +1191,11 @@ static int intern_test(C_SHELL *sh, int argc, char **argv)
     res = !oexpr(data);
   } while(0);
 
+  for(i = 0; i < data->parser.argc; i++) {
+    if(data->parser.argv[i] != NULL) {
+      cache_free(sh->cache, data->parser.argv[i]);
+    }
+  }
   cache_free(sh->cache, data);
   return res;
 }
@@ -1186,8 +1205,8 @@ static int oexpr(TEST_DATA *data)
   int res;
   debug_msg(data, "oexpr");
   res = aexpr(data);
-  if (data->lex[data->arg0].type == LEX_OR) {
-    data->arg0 ++;
+  if (data->parser.lex[data->parser.arg0].type == LEX_OR) {
+    data->parser.arg0 ++;
     return oexpr(data) || res;
   }
   return res;
@@ -1199,8 +1218,8 @@ static int aexpr(TEST_DATA *data)
 
   debug_msg(data, "aexpr");
   res = nexpr(data);
-  if (data->lex[data->arg0].type == LEX_AND) {
-    data->arg0 ++;
+  if (data->parser.lex[data->parser.arg0].type == LEX_AND) {
+    data->parser.arg0 ++;
     return aexpr(data) && res;
   }
   return res;
@@ -1209,8 +1228,8 @@ static int aexpr(TEST_DATA *data)
 static int nexpr(TEST_DATA *data)
 {
   debug_msg(data, "nexpr");
-  if (data->lex[data->arg0].type == LEX_NOT) {
-    data->arg0 ++;
+  if (data->parser.lex[data->parser.arg0].type == LEX_NOT) {
+    data->parser.arg0 ++;
     return !nexpr(data);
   }
   return primary(data);
@@ -1220,78 +1239,78 @@ static int primary(TEST_DATA *data)
 {
   int res;
   debug_msg(data, "primary");
-  if (data->argc <= data->arg0) {
+  if (data->parser.argc <= data->parser.arg0) {
     syntax(data, NULL, "Argument expected");
     return 0;
   }
 
-  if(data->lex[data->arg0].type == LEX_LPAREN) {
-    data->arg0 ++;
+  if(data->parser.lex[data->parser.arg0].type == LEX_LPAREN) {
+    data->parser.arg0 ++;
     res = oexpr(data);
-    if(data->lex[data->arg0].type != LEX_RPAREN) {
+    if(data->parser.lex[data->parser.arg0].type != LEX_RPAREN) {
       syntax(data, NULL, "Closing paren expected");
     }
-    data->arg0 ++;
+    data->parser.arg0 ++;
     return res;
   }
 
-  if(data->arg0 < data->argc + 2
-     && data->lex[data->arg0].type == LEX_STR
-     && data->lex[data->arg0 + 2].type == LEX_STR)
+  if(data->parser.arg0 < data->parser.argc + 2
+     && data->parser.lex[data->parser.arg0].type == LEX_STR
+     && data->parser.lex[data->parser.arg0 + 2].type == LEX_STR)
      {
     res = binop(data);
-    data->arg0 += 3;
+    data->parser.arg0 += 3;
     return res;
   }
 
-  if(data->lex[data->arg0].type == LEX_STR) {
+  if(data->parser.lex[data->parser.arg0].type == LEX_STR) {
     res = operand(data);
-    data->arg0 ++;
+    data->parser.arg0 ++;
     return res;
   }
 
-  syntax(data, data->argv[data->arg0], "Invalid operation");
+  syntax(data, data->parser.argv[data->parser.arg0], "Invalid operation");
   return 2;
 }
 /*----------------------------------------------------------------------------*/
 static int binop(TEST_DATA *data)
 {
   debug_msg(data, "binop");
-  switch (data->lex[data->arg0 + 1].type) {
+  switch (data->parser.lex[data->parser.arg0 + 1].type) {
     case LEX_EQ: case LEX_ASSIGN:
-      return !strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]);
+      return !strcmp(data->parser.argv[data->parser.arg0], data->parser.argv[data->parser.arg0 + 2]);
     case LEX_NE:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]);
+      return strcmp(data->parser.argv[data->parser.arg0], data->parser.argv[data->parser.arg0 + 2]);
     case LEX_GT:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) > 0;
+      return strcmp(data->parser.argv[data->parser.arg0], data->parser.argv[data->parser.arg0 + 2]) > 0;
     case LEX_GE:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) >= 0;
+      return strcmp(data->parser.argv[data->parser.arg0], data->parser.argv[data->parser.arg0 + 2]) >= 0;
     case LEX_LT:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) < 0;
+      return strcmp(data->parser.argv[data->parser.arg0], data->parser.argv[data->parser.arg0 + 2]) < 0;
     case LEX_LE:
-      return strcmp(data->argv[data->arg0], data->argv[data->arg0 + 2]) <= 0;
+      return strcmp(data->parser.argv[data->parser.arg0], data->parser.argv[data->parser.arg0 + 2]) <= 0;
 
     case LEX_IEQ:
-      return atoi(data->argv[data->arg0]) == atoi(data->argv[data->arg0 + 2]);
+      return atoi(data->parser.argv[data->parser.arg0]) == atoi(data->parser.argv[data->parser.arg0 + 2]);
     case LEX_INE:
-      return atoi(data->argv[data->arg0]) != atoi(data->argv[data->arg0 + 2]);
+      return atoi(data->parser.argv[data->parser.arg0]) != atoi(data->parser.argv[data->parser.arg0 + 2]);
     case LEX_IGT:
-      return atoi(data->argv[data->arg0]) > atoi(data->argv[data->arg0 + 2]);
+      return atoi(data->parser.argv[data->parser.arg0]) > atoi(data->parser.argv[data->parser.arg0 + 2]);
     case LEX_IGE:
-      return atoi(data->argv[data->arg0]) >= atoi(data->argv[data->arg0 + 2]);
+      return atoi(data->parser.argv[data->parser.arg0]) >= atoi(data->parser.argv[data->parser.arg0 + 2]);
     case LEX_ILT:
-      return atoi(data->argv[data->arg0]) < atoi(data->argv[data->arg0 + 2]);
+      return atoi(data->parser.argv[data->parser.arg0]) < atoi(data->parser.argv[data->parser.arg0 + 2]);
     case LEX_ILE:
-      return atoi(data->argv[data->arg0]) <= atoi(data->argv[data->arg0 + 2]);
+      return atoi(data->parser.argv[data->parser.arg0]) <= atoi(data->parser.argv[data->parser.arg0 + 2]);
   }
-  syntax(data, data->argv[data->arg0 + 1], "Invalid operator");
+  syntax(data, data->parser.argv[data->parser.arg0 + 1], "Invalid operator");
   return 2;
 }
 /*----------------------------------------------------------------------------*/
 static int operand(TEST_DATA *data)
 {
   debug_msg(data, "operand");
-  return data->argv[data->arg0] != NULL && *data->argv[data->arg0] != 0;
+  return data->parser.argv[data->parser.arg0] != NULL && *data->parser.argv[data->parser.arg0] != 0;
 }
 /*----------------------------------------------------------------------------*/
 #endif //USE_SH_TEST

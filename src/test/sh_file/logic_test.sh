@@ -1,3 +1,4 @@
+echo $0
 #__DEBUG__=1
 #__DEBUG_LEX__=1
 

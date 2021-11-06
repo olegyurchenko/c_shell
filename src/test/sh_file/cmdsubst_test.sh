@@ -37,3 +37,21 @@ if [ "$x" == "12345" ] ; then echo Ok ; else echo Failed ; fi
 echo -n "Test6 "
 x="Quote test \"111\""
 if [ "$x" == "Quote test \"111\"" ] ; then echo Ok ; else echo Failed ; fi
+
+echo -n "Test7 "
+x="  Quote test \"111\"  "
+if [ "$x" == "  Quote test \"111\"  " ] ; then echo Ok ; else echo Failed ; fi
+
+
+x=''
+for i in "`seq 5`";do
+#__DEBUG__=1
+#__DEBUG_LEX__=1
+x="${x}`echo $i`"
+#__DEBUG_LEX__=0
+#__DEBUG__=0
+done
+
+#echo ">$x<"
+echo -n "Test8 "
+if [ "$x" == "1 2 3 4 5" ] ; then echo Ok ; else echo Failed ; fi

@@ -100,9 +100,11 @@ int step_cb(void *arg, int argc, char **argv)
 
 static int exec_file(void *arg, int argc, char **argv)
 {
-  int i;
-  int ret = SHELL_OK;
+  int i, ret = SHELL_OK;
   TEST_SHELL_DATA *data;
+  FILE *f;
+  int line = 0, debug = 0;
+  char buffer[1024];
 
   data = (TEST_SHELL_DATA *) arg;
 
@@ -112,42 +114,37 @@ static int exec_file(void *arg, int argc, char **argv)
 
 
 
-    FILE *f;
+  f = fopen(argv[0], "r");
+  if(f == NULL)
+  {
+    shell_printf(data->sh, "Error open file '%s'\n", argv[0]);
+    return SHELL_ERR_INVALID_ARG;
+  }
 
-    int line = 0, debug = 0;
-    char buffer[1024];
+  for(i = 0; i < argc; i++) {
+    snprintf(buffer, sizeof(buffer), "%d", i);
+    shell_set_var(data->sh, buffer, argv[i]);
+  }
 
-    f = fopen(argv[i], "r");
-    if(f == NULL)
-    {
-      shell_printf(data->sh, "Error open file '%s'\n", argv[i]);
-      return SHELL_ERR_INVALID_ARG;
+  ret = 0;
+  while (!feof(f)) {
+    line ++;
+    if(NULL == fgets(buffer, sizeof(buffer), f)) {
+      ret = 0;
+      break;
     }
-
-    for(i = 0; i < argc - 1; i++) {
-      snprintf(buffer, sizeof(buffer), "$%d", i);
-      shell_set_var(data->sh, buffer, argv[i + 1]);
+    if(SHELL_OK == shell_get_int_var(data->sh, SHELL_DEBUG_VAR_NAME, &debug) && debug) {
+      shell_printf(data->sh, "%s:%d:%s\n", argv[0], line, buffer);
     }
-
-    ret = 0;
-    while (!feof(f)) {
-      line ++;
-      if(NULL == fgets(buffer, sizeof(buffer), f)) {
-        ret = 0;
-        break;
-      }
-      if(SHELL_OK == shell_get_int_var(data->sh, SHELL_DEBUG_VAR_NAME, &debug) && debug) {
-        shell_printf(data->sh, "%s:%d:%s\n", argv[i], line, buffer);
-      }
-      ret = shell_rx(data->sh, buffer);
-      if(ret < 0) {
-        shell_printf(data->sh, "%s:%d:%s\n", argv[i], line, shell_err_string(data->sh, ret));
-        break;
-      }
+    ret = shell_rx(data->sh, buffer);
+    if(ret < 0) {
+      shell_printf(data->sh, "%s:%d:%s\n", argv[0], line, shell_err_string(data->sh, ret));
+      break;
     }
+  }
 
-    fclose(f);
-    return ret;
+  fclose(f);
+  return ret;
 }
 
 int shell_exec(void *arg, int argc, char **argv)
@@ -155,7 +152,7 @@ int shell_exec(void *arg, int argc, char **argv)
 
   if(argc >= 1) {
     if(!strcmp(argv[0], ".")) {
-      return exec_file(arg, argc, argv);
+      return exec_file(arg, argc - 1, &argv[1]);
     }
   }
 
@@ -194,7 +191,7 @@ int main(int argc, char ** argv)
   }
   setup_console();
 
-  tty_printf(data.tty, "%s\n", "Use 'quit' or 'exit' to quit.");
+  tty_printf(data.tty, "%s\n", "Use 'exit' to quit.");
   tty_rx(data.tty, '\n');
   tty_set_enter_cb(data.tty, enter_cb, &data);
 

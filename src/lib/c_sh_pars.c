@@ -44,7 +44,7 @@ int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *ds
 {
   int count = 0, arg_size = 0, quote = 0, lparen = 0;
   unsigned i;
-  for(i = 0; i < size && count < (int) lex_size; i++) {
+  for(i = 0; i < size && src[i] && count < (int) lex_size; i++) {
 
     if(src[i] == '\\') {
       i ++;
@@ -314,8 +314,7 @@ int test_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *dst, 
 {
   int count = 0, arg_size = 0, quote = 0;
   unsigned i;
-  for(i = 0; i < size && count < (int) lex_size; i++) {
-
+  for(i = 0; i < size && src[i] && count < (int) lex_size; i++) {
     if(src[i] == '\\') {
       i ++;
       continue;
@@ -763,7 +762,7 @@ int sh_make_argv(C_SHELL *sh, C_SHELL_PARSER *parser)
   int i, j, ret = SHELL_OK;
   LEX_ELEM lex;
   char *buffer1, *buffer2 = NULL;
-  const char *end, *p;
+  const char *end;
   unsigned sz;
 
   for(i = 0; i < parser->argc; i++) {
@@ -831,7 +830,7 @@ int sh_make_argv(C_SHELL *sh, C_SHELL_PARSER *parser)
 
               parser->lex[i + j + data->parser.argc + 1] = lex;
             }
-            parser->argc += data->parser.argc;
+            parser->argc += data->parser.argc - 1;
           } while(0);
 
           cache_free(sh->cache, data);
@@ -1224,6 +1223,54 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
     cache_free(sh->cache, out_buffer);
   }
   return ret;
+}
+/*----------------------------------------------------------------------------*/
+/** String argument representation: 123=>123 11 22 => '11 22' */
+int to_str(const char *src, char *dst, unsigned buffer_size)
+{
+  int i, size, have_blank = 0;
+  const char *sdst;
+
+  sdst = dst;
+  while(*src && isblank(*src)) {
+    src ++;
+  }
+
+  size = strlen(src);
+  if(buffer_size) {
+    *dst = 0;
+  } else {
+    return 0;
+  }
+
+
+  for(i = 0; i < size; i++) {
+    if(isblank(src[i])) {
+      have_blank ++;
+      break;
+    }
+  }
+
+  if(buffer_size && (have_blank || !size)) {
+    *dst = '\'';
+    dst ++; buffer_size --;
+  }
+
+  if(size < (int) buffer_size) {
+    memcpy(dst, src, size);
+    dst += size; buffer_size -= size;
+  }
+
+  if(buffer_size && (have_blank || !size)) {
+    *dst = '\'';
+    dst ++; buffer_size --;
+  }
+
+  if(buffer_size) {
+    *dst = 0;
+  }
+
+  return dst - sdst;
 }
 /*----------------------------------------------------------------------------*/
 

@@ -1,3 +1,4 @@
+echo $0
 # while, for, break, continue tests
 #__DEBUG__ = 1
 
