@@ -1417,7 +1417,7 @@ static int _atoi(const char *src, unsigned size)
     if(*p >= '0' && *p <= '9')
     {
       c *= 10;
-      c |= (unsigned char )(*p - '0');
+      c += (unsigned int)(*p - '0');
     }
     else
       break;
@@ -1449,7 +1449,6 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
 {
   unsigned i;
   *end = src + 1;
-  size --;
   switch(*src) {
     case '(':
       return AL_LPAREN;
@@ -1490,15 +1489,13 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
           size -= 2;
           *end = src;
           for(i = 0; i < size; i++) {
-            if(src[i] < 'A'
-               && src[i] > 'F'
-               && src[i] < 'a'
-               && src[i] > 'f'
-               && src[i] < '0'
-               && src[i] > '9') {
+            if( (src[i] >= 'A' && src[i] <= 'F')
+               || (src[i] >= 'a' && src[i] <= 'f')
+               || (src[i] >= '0'&& src[i] <= '9')) {
+              *end = &src[i + 1];
+            } else {
               break;
             }
-            *end = &src[i + 1];
           }
           return AL_NUMBER;
         }
@@ -1506,8 +1503,7 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
         //Octal digit
         if(*src == '0') {
           for(i = 0; i < size; i++) {
-            if(src[i] < '0'
-               && src[i] > '7') {
+            if(src[i] < '0' || src[i] > '7') {
               break;
             }
             *end = &src[i + 1];
@@ -1517,8 +1513,7 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
 
         //Decimal
         for(i = 0; i < size; i++) {
-          if(src[i] < '0'
-             && src[i] > '9') {
+          if(src[i] < '0' || src[i] > '9') {
             break;
           }
           *end = &src[i + 1];
@@ -1545,16 +1540,104 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
 }
 /*----------------------------------------------------------------------------*/
 typedef struct APARS {
-  int operand;
-  int operands[2];
-  int operators[2];
+  int operands;
+  int operators;
+  int operand[2];
+  int operator[2];
+  int unary_prefix;
+  int unary_postfix;
   struct APARS *prev;
 } APARS;
+/*----------------------------------------------------------------------------*/
+static int op_binary(C_SHELL *sh, int arg1, int arg2, int op, int *dst) {
+  switch(op) {
+    case AL_PLUS:
+      *dst = arg1 + arg2;
+      break;
+    case AL_MINUS:
+      *dst = arg1 - arg2;
+      break;
+    case AL_MUL:
+      *dst = arg1 * arg2;
+      break;
+    case AL_DIV:
+      if(!arg2) {
+        shell_fprintf(sh, SHELL_STDERR, "Integer divide by zerro\n");
+        return SHELL_ERR_INVALID_OP;
+      }
+      *dst = arg1 / arg2;
+      break;
+    case AL_MOD:
+      if(!arg2) {
+        shell_fprintf(sh, SHELL_STDERR, "Integer divide by zerro\n");
+        return SHELL_ERR_INVALID_OP;
+      }
+      *dst = arg1 % arg2;
+      break;
+    default:
+      shell_fprintf(sh, SHELL_STDERR, "Invalid arithmetic operator\n");
+      return SHELL_ERR_INVALID_OP;
+  }
+  return SHELL_OK;
+}
+/*----------------------------------------------------------------------------*/
+static int op_priority(int op) {
+  switch(op) {
+    case AL_PLUS:
+    case AL_MINUS:
+      return 0;
+    case AL_INCR:
+    case AL_DECR:
+      return 1;
+    case AL_MUL:
+    case AL_DIV:
+    case AL_MOD:
+      return 2;
+  }
+  return -1;
+}
+/*----------------------------------------------------------------------------*/
+static int op_operand(C_SHELL *sh, APARS *state, int operand)
+{
+  int ret = 0, priority;
+  switch (state->unary_prefix) {
+    case AL_MINUS:
+      operand = -1 * operand;
+      break;
+    case AL_INCR:
+      operand += 1;
+      break;
+    case AL_DECR:
+      operand -= 1;
+      break;
+  }
+  state->unary_prefix = 0;
+
+  if(state->operands < 2) {
+    state->operand[state->operands] = operand;
+    state->operands ++;
+  } else {
+    //Compary op priority
+    priority = op_priority(state->operator[0]);
+    if(priority >= op_priority(state->operator[1])) {
+      ret = op_binary(sh, state->operand[0], state->operand[1], state->operator[0], &state->operand[0]);
+      state->operand[1] = operand;
+      state->operator[0] = state->operator[1];
+      state->operands = 2;
+      state->operators = 1;
+    } else {
+      ret = op_binary(sh, state->operand[1], operand, state->operator[1], &state->operand[1]);
+      state->operands = 2;
+      state->operators = 1;
+    }
+  }
+  return ret;
+}
 /*----------------------------------------------------------------------------*/
 /**Run arithmetic expression*/
 int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsigned buffer_size)
 {
-  int ret = 0, lex;
+  int ret = 0, lex, operand, priority;
   unsigned sz;
   APARS *state, *n;
   const char *p, *end, *v;
@@ -1562,7 +1645,7 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
 
 
   p = src;
-  state = (APARS *) cache_alloc(sh->cache, sizeof (sizeof (APARS)));
+  state = (APARS *) cache_alloc(sh->cache, sizeof(APARS));
   if(state == NULL) {
     return SHELL_ERR_MALLOC;
   }
@@ -1570,14 +1653,16 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
   state->prev = NULL;
   do {
 
-    while (p - src > size) {
+    while (p - src < size) {
       lex = arithmetic_lex(p, size - (p - src), &end);
-      if(lex == AL_UNDEFINED) {
-        ret = SHELL_ERR_INVALID_OP;
-        break;
-      }
 
       if(lex == AL_VAR || lex == AL_NUMBER) {
+
+        if(state->operands && state->operators < state->operands) {
+          ret = SHELL_ERR_INVALID_OP;
+          break;
+        }
+
         if(lex == AL_VAR) {
           sz = end - p;
           if(sz >= sizeof(name) - 1) {
@@ -1588,19 +1673,129 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
           v = sh_get_var(sh, name);
           if(v != NULL && *v) {
             sz = strlen(v);
-            state->operands[state->operand] = _atoi(v, sz);
+            operand = _atoi(v, sz);
           }
         }
 
         if(lex == AL_NUMBER) {
-          state->operands[state->operand] = _atoi(p, end - p);
+          operand = _atoi(p, end - p);
         }
-        state->operand ++;
+
+        ret = op_operand(sh, state, operand);
+
+      } else {
+        switch(lex) {
+          case AL_BLANK:
+            break;
+
+         //Binary
+          case AL_PLUS:
+          case AL_MINUS:
+            if(!state->operands || state->operators >= state->operands) {
+              state->unary_prefix = lex;
+            } else {
+              state->operator[state->operators] = lex;
+              state->operators ++;
+            }
+            break;
+          case AL_MUL:
+          case AL_DIV:
+          case AL_MOD:
+            if(!state->operands || state->operators >= state->operands) {
+              ret = SHELL_ERR_INVALID_OP;
+            } else {
+              state->operator[state->operators] = lex;
+              state->operators ++;
+            }
+            break;
+          //Unary
+          case AL_INCR:
+          case AL_DECR:
+            //TODO
+            break;
+
+          case AL_LPAREN:
+            n = (APARS *) cache_alloc(sh->cache, sizeof(APARS));
+            if(n == NULL) {
+              ret = SHELL_ERR_MALLOC;
+              break;
+            }
+            memset(n, 0, sizeof(APARS));
+            n->prev = state;
+            state = n;
+            break;
+
+          case AL_RPAREN:
+            if(state->prev == NULL) {
+              ret = SHELL_ERR_INVALID_OP;
+              break;
+            }
+            if(state->operators && state->operands <= state->operators) {
+              ret = SHELL_ERR_INVALID_OP;
+              break;
+            }
+            if(state->operands > 1) {
+              ret = op_binary(sh, state->operand[0], state->operand[1], state->operator[0], &state->operand[0]);
+              state->operands = 1;
+            }
+
+            if(ret < 0) {
+              break;
+            }
+
+            if(state->operands) {
+              operand = state->operand[0];
+              n = state->prev;
+              cache_free(sh->cache, state);
+              state = n;
+              ret = op_operand(sh, state, operand);
+            } else {
+              n = state->prev;
+              cache_free(sh->cache, state);
+              state = n;
+            }
+            break;
+
+
+          default:
+            ret = SHELL_ERR_INVALID_OP;
+        }
       }
 
+      if(ret < 0) {
+        break;
+      }
 
       p = end;
     }
+
+    if(ret < 0) {
+      break;
+    }
+
+    if(state->prev != NULL) {
+      shell_fprintf(sh, SHELL_STDERR, "Not closed (\n");
+      ret = SHELL_ERR_INVALID_OP;
+      break;
+    }
+
+    if(state->operators && state->operands <= state->operators) {
+      ret = SHELL_ERR_INVALID_OP;
+      break;
+    }
+
+    if(state->operands) {
+      if(state->operands > 1) {
+        ret = op_binary(sh, state->operand[0], state->operand[1], state->operator[0], &state->operand[0]);
+        state->operands = 1;
+      }
+      if(ret < 0) {
+        break;
+      }
+      ret = snprintf(buffer, buffer_size, "%d", state->operand[0]);
+      buffer[buffer_size - 1] = 0;
+    }
+
 
   } while(0);
 
@@ -1610,6 +1805,23 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
     cache_free(sh->cache, state);
     state = n;
   }
+
+  if(ret < 0) {
+    shell_fprintf(sh, SHELL_STDERR, "\n`");
+    for(sz = 0; sz < size; sz++) {
+      shell_fputc(sh, SHELL_STDERR, src[sz]);
+    }
+    shell_fprintf(sh, SHELL_STDERR, "'\n ");
+    for(sz = 0; sz < size; sz++) {
+      if(&src[sz] == p) {
+        shell_fputc(sh, SHELL_STDERR, '^');
+        break;
+      }
+      shell_fputc(sh, SHELL_STDERR, ' ');
+    }
+    shell_fputs(sh, SHELL_STDERR, "\r\n");
+  }
+
   return ret;
 }
 /*----------------------------------------------------------------------------*/
