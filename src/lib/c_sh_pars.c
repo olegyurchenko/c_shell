@@ -1031,7 +1031,25 @@ static int cmd_subst(C_SHELL *sh, const char *start, const char *end, char *buff
   return ret;
 }
 /*----------------------------------------------------------------------------*/
-static const char *subst_find(const char *src, unsigned size, int what)
+static int arithmetic_subst(C_SHELL *sh, const char *start, const char *end, char *buffer, unsigned buffer_size)
+{
+  unsigned size;
+
+  size = end - start;
+
+  if(sh_is_lex_debug_mode(sh)) {
+    unsigned i;
+    shell_puts(sh, "arithmetic:`");
+    for(i = 0; i < size; i++) {
+      shell_putc(sh, start[i]);
+    }
+    shell_puts(sh, "'\n");
+  }
+
+  return arithmetic(sh, start, size, buffer, buffer_size);
+}
+/*----------------------------------------------------------------------------*/
+static const char *subst_find_char(const char *src, unsigned size, int what)
 {
   int quote = 0;
   unsigned i;
@@ -1062,6 +1080,39 @@ static const char *subst_find(const char *src, unsigned size, int what)
   return NULL;
 }
 /*----------------------------------------------------------------------------*/
+static const char *subst_find_str(const char *src, unsigned size, const char *what)
+{
+  int quote = 0;
+  unsigned i, sz;
+  sz = strlen(what);
+  for(i = 0; i < size; i++) {
+
+    if(src[i] == '\\') {
+      i ++;
+      continue;
+    }
+
+    if(src[i] == '\'') {
+      if(!quote) {
+        quote = src[i];
+      }
+      else {
+        quote = 0;
+      }
+      continue;
+    }
+
+    if(quote)
+      continue;
+
+    if(size - i >= sz
+       && !memcmp(&src[i], what, sz)) {
+      return &src[i];
+    }
+  }
+  return NULL;
+}
+/*----------------------------------------------------------------------------*/
 int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsigned dst_size)
 {
   static const char delimiters[] = ";|{}/\\+*-=><!$&()\"\'`";
@@ -1077,7 +1128,8 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
     PAREN_SUBS,  //${name}
     BRACES_SUBS, //$(cmd)
     BACKTICK_SUBS, //`cmd`
-    SIMPLE_SUBS  //$xxx
+    SIMPLE_SUBS,  //$xxx
+    ARITHMETIC_SUBS //$((expression))
   } type;
 
   p = src;
@@ -1086,11 +1138,11 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
 
     while (1) {
       type = NO_SUBS;
-      p = subst_find(p, size - (p - src), '$');
+      p = subst_find_char(p, size - (p - src), '$');
       start = end = p;
 
       if(p == NULL) {
-        p = subst_find(src, size, '`');
+        p = subst_find_char(src, size, '`');
         start = end = p;
       }
 
@@ -1108,7 +1160,7 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
         end = ++p;
         if(*p == '{') {
           type = PAREN_SUBS;
-          if((end = subst_find(p, size - (p - src), '}')) == NULL) {
+          if((end = subst_find_char(p, size - (p - src), '}')) == NULL) {
             type = DUMMY_SUBS;
             end = ++ p;
           } else {
@@ -1117,16 +1169,33 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
 
 
         } else if(*p == '(') {
-          type = BRACES_SUBS;
-          if((end = subst_find(p, size - (p - src), ')')) == NULL) {
-            type = DUMMY_SUBS;
-            end = ++ p;
+          if(size > 1 && p[1] == '(') {
+            p ++;
+            type = ARITHMETIC_SUBS;
+            if((end = subst_find_str(p, size - (p - src), "))")) == NULL) {
+              type = DUMMY_SUBS;
+              end = ++ p;
+            } else {
+              end += 2;
+              next = subst_find_char(p, size - (p - src), '$');
+              if(next != NULL) {
+                p = next;
+                continue;
+              }
+            }
+
           } else {
-            end ++;
-            next = subst_find(p, size - (p - src), '$');
-            if(next != NULL) {
-              p = next;
-              continue;
+            type = BRACES_SUBS;
+            if((end = subst_find_char(p, size - (p - src), ')')) == NULL) {
+              type = DUMMY_SUBS;
+              end = ++ p;
+            } else {
+              end ++;
+              next = subst_find_char(p, size - (p - src), '$');
+              if(next != NULL) {
+                p = next;
+                continue;
+              }
             }
           }
 
@@ -1144,12 +1213,12 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
         //Backstick substitution
         end = ++p;
         type = BACKTICK_SUBS;
-        if((end = subst_find(p, size - (p - src), '`')) == NULL) {
+        if((end = subst_find_char(p, size - (p - src), '`')) == NULL) {
           type = DUMMY_SUBS;
           end = p;
         } else {
           end ++;
-          next = subst_find(p, size - (p - src), '$');
+          next = subst_find_char(p, size - (p - src), '$');
           if(next != NULL) {
             p = next;
             continue;
@@ -1178,6 +1247,9 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
           break;
         case BRACES_SUBS: //$()
           ret = cmd_subst(sh, start + 2, end - 1, &out_buffer[index], buffer_size - index);
+          break;
+        case ARITHMETIC_SUBS: //$(())
+          ret = arithmetic_subst(sh, start + 3, end - 2, &out_buffer[index], buffer_size - index);
           break;
         case BACKTICK_SUBS: //`xxx`
           ret = cmd_subst(sh, start + 1, end - 1, &out_buffer[index], buffer_size - index);
@@ -1271,6 +1343,274 @@ int to_str(const char *src, char *dst, unsigned buffer_size)
   }
 
   return dst - sdst;
+}
+/*----------------------------------------------------------------------------*/
+static int _htoi(const char *src, unsigned size)
+{
+  unsigned int c = 0;
+  const char *p;
+  unsigned i;
+  p = src;
+  for(i = 0; i < size; i++)
+  {
+    if(*p >= 'A' && *p <= 'Z')
+    {
+      c <<= 4;
+      c |= (unsigned char)(*p - 'A' + 0xa);
+    }
+    else
+    if(*p >= 'a' && *p <= 'z')
+    {
+      c <<= 4;
+      c |= (unsigned char)(*p - 'a' + 0xa);
+    }
+    else
+    if(*p >= '0' && *p <= '9')
+    {
+      c <<= 4;
+      c |= (unsigned char)(*p - '0');
+    }
+    else
+      break;
+    p ++;
+  }
+  return (int) c;
+}
+/*----------------------------------------------------------------------------*/
+static int _otoi(const char *src, unsigned size)
+{
+  unsigned int c = 0;
+  unsigned i;
+  const char *p;
+  p = src;
+  for(i = 0; i < size; i++)
+  {
+    if(*p >= '0' && *p <= '7')
+    {
+      c <<= 3;
+      c |= (unsigned char )(*p - '0');
+    }
+    else
+      break;
+    p ++;
+  }
+
+  return (int) c;
+}
+/*----------------------------------------------------------------------------*/
+static int _atoi(const char *src, unsigned size)
+{
+  unsigned int c = 0;
+  unsigned i;
+  const char *p;
+  p = src;
+
+  if(*src == '0') {
+    if(size > 2 && (src[1] == 'x' || src[1] == 'X')) {
+      return _htoi(&src[2], size - 2);
+    }
+    return _otoi(src, size);
+  }
+
+  for(i = 0; i < size; i++)
+  {
+    if(*p >= '0' && *p <= '9')
+    {
+      c *= 10;
+      c |= (unsigned char )(*p - '0');
+    }
+    else
+      break;
+    p ++;
+  }
+
+  return (int) c;
+}
+/*----------------------------------------------------------------------------*/
+/** Arithmetic lexer*/
+enum ARITHMETIC_LEX {
+  AL_BLANK,
+  AL_NUMBER,
+  AL_VAR,
+  AL_LPAREN, //(
+  AL_RPAREN, //)
+  AL_PLUS, //+
+  AL_MINUS, //-
+  AL_INCR, //++
+  AL_DECR, //--
+  AL_MUL, //*
+  AL_DIV, // /
+  AL_MOD, //%
+
+  AL_UNDEFINED
+};
+
+static int arithmetic_lex(const char *src, unsigned size, const char **end)
+{
+  unsigned i;
+  *end = src + 1;
+  size --;
+  switch(*src) {
+    case '(':
+      return AL_LPAREN;
+    case ')':
+      return AL_RPAREN;
+    case '+':
+      if(size && src[1] == '+') {
+        ++ *end;
+        return AL_INCR;
+      }
+      return AL_PLUS;
+
+    case '-':
+      if(size && src[1] == '-') {
+        ++ *end;
+        return AL_DECR;
+      }
+      return AL_MINUS;
+
+    case '*':
+      return AL_MUL;
+    case '/':
+      return AL_DIV;
+    case '%':
+      return AL_MOD;
+
+    default:
+      if(isblank(*src)) {
+        return AL_BLANK;
+      }
+
+      if(*src >= '0' && *src <= '9') {
+        //Hex digit
+        if(*src == '0'
+           && size > 1
+           && (src[1] == 'x' || src[1] == 'X')) {
+          src = &src[2];
+          size -= 2;
+          *end = src;
+          for(i = 0; i < size; i++) {
+            if(src[i] < 'A'
+               && src[i] > 'F'
+               && src[i] < 'a'
+               && src[i] > 'f'
+               && src[i] < '0'
+               && src[i] > '9') {
+              break;
+            }
+            *end = &src[i + 1];
+          }
+          return AL_NUMBER;
+        }
+
+        //Octal digit
+        if(*src == '0') {
+          for(i = 0; i < size; i++) {
+            if(src[i] < '0'
+               && src[i] > '7') {
+              break;
+            }
+            *end = &src[i + 1];
+          }
+          return AL_NUMBER;
+        }
+
+        //Decimal
+        for(i = 0; i < size; i++) {
+          if(src[i] < '0'
+             && src[i] > '9') {
+            break;
+          }
+          *end = &src[i + 1];
+        }
+        return AL_NUMBER;
+      }
+
+      if( (*src >= 'A' && *src <= 'Z')
+          || (*src <= 'a' && *src <= 'z')
+          || *src == '_') {
+        for(i = 0; i < size; i++) {
+          if( ! ((*src >= 'A' && *src <= 'Z')
+                 || (*src <= 'a' && *src <= 'z')
+                 || (*src <= '0' && *src <= '9')
+                 || *src == '_')) {
+            break;
+          }
+          *end = &src[i + 1];
+        }
+      }
+      break;
+  }
+  return AL_UNDEFINED;
+}
+/*----------------------------------------------------------------------------*/
+typedef struct APARS {
+  int operand;
+  int operands[2];
+  int operators[2];
+  struct APARS *prev;
+} APARS;
+/*----------------------------------------------------------------------------*/
+/**Run arithmetic expression*/
+int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsigned buffer_size)
+{
+  int ret = 0, lex;
+  unsigned sz;
+  APARS *state, *n;
+  const char *p, *end, *v;
+  char name[VAR_NAME_LENGTH];
+
+
+  p = src;
+  state = (APARS *) cache_alloc(sh->cache, sizeof (sizeof (APARS)));
+  if(state == NULL) {
+    return SHELL_ERR_MALLOC;
+  }
+  memset(state, 0, sizeof(APARS));
+  state->prev = NULL;
+  do {
+
+    while (p - src > size) {
+      lex = arithmetic_lex(p, size - (p - src), &end);
+      if(lex == AL_UNDEFINED) {
+        ret = SHELL_ERR_INVALID_OP;
+        break;
+      }
+
+      if(lex == AL_VAR || lex == AL_NUMBER) {
+        if(lex == AL_VAR) {
+          sz = end - p;
+          if(sz >= sizeof(name) - 1) {
+            sz = sizeof(name) - 1;
+          }
+          memcpy(name, p, sz);
+          name[sz] = '\0';
+          v = sh_get_var(sh, name);
+          if(v != NULL && *v) {
+            sz = strlen(v);
+            state->operands[state->operand] = _atoi(v, sz);
+          }
+        }
+
+        if(lex == AL_NUMBER) {
+          state->operands[state->operand] = _atoi(p, end - p);
+        }
+        state->operand ++;
+      }
+
+
+      p = end;
+    }
+
+  } while(0);
+
+  //FREE states
+  while(state != NULL) {
+    n = state->prev;
+    cache_free(sh->cache, state);
+    state = n;
+  }
+  return ret;
 }
 /*----------------------------------------------------------------------------*/
 
