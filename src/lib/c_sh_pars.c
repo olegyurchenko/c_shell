@@ -122,7 +122,7 @@ int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *ds
       break;
     }
 
-    if(src[i] == '=') {
+    if(src[i] == '=' && lparen <= 0) {
       if(arg_size) {
         dst[count].end = &src[i];
         count ++;
@@ -140,7 +140,7 @@ int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *ds
       continue;
     } //=
 
-    if(src[i] == '>') {
+    if(src[i] == '>' && lparen <= 0) {
       if(arg_size) {
         dst[count].end = &src[i];
         count ++;
@@ -158,7 +158,7 @@ int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *ds
       continue;
     } //> >=
 
-    if(src[i] == '<') {
+    if(src[i] == '<' && lparen <= 0) {
       if(arg_size) {
         dst[count].end = &src[i];
         count ++;
@@ -176,7 +176,7 @@ int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *ds
       continue;
     } //< <=
 
-    if(src[i] == '&') {
+    if(src[i] == '&' && lparen <= 0) {
       if(arg_size) {
         dst[count].end = &src[i];
         count ++;
@@ -198,7 +198,7 @@ int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *ds
       continue;
     } //& &&
 
-    if(src[i] == '|') {
+    if(src[i] == '|' && lparen <= 0) {
       if(arg_size) {
         dst[count].end = &src[i];
         count ++;
@@ -220,7 +220,7 @@ int cmdline_lexer(const char *src, unsigned size, const char **end, LEX_ELEM *ds
       continue;
     } //& &&
 
-    if(src[i] == '!') {
+    if(src[i] == '!' && lparen <= 0) {
       if(arg_size) {
         dst[count].end = &src[i];
         count ++;
@@ -1429,20 +1429,36 @@ static int _atoi(const char *src, unsigned size)
 /*----------------------------------------------------------------------------*/
 /** Arithmetic lexer*/
 enum ARITHMETIC_LEX {
-  AL_BLANK,
-  AL_NUMBER,
-  AL_VAR,
-  AL_LPAREN, //(
-  AL_RPAREN, //)
-  AL_PLUS, //+
-  AL_MINUS, //-
-  AL_INCR, //++
-  AL_DECR, //--
-  AL_MUL, //*
-  AL_DIV, // /
-  AL_MOD, //%
+  AL_BLANK
+  , AL_NUMBER
+  , AL_VAR
+  , AL_LPAREN //(
+  , AL_RPAREN //)
+  , AL_PLUS //+
+  , AL_MINUS //-
+  , AL_INCR //++
+  , AL_DECR //--
+  , AL_MUL //*
+  , AL_DIV // /
+  , AL_MOD //%
+  , AL_AND //&&
+  , AL_OR //||
+  , AL_BAND //&
+  , AL_BOR //|
+  , AL_EQ  // ==
+  , AL_NE  // !=
+  , AL_GT  //>
+  , AL_GE  //>=
+  , AL_LT  //<
+  , AL_LE  //<=
+  , AL_ASSIGN //=
+  , AL_NOT  // !
+  , AL_BNOT  // ~
+  , AL_BXOR  // ^
+  , AL_BLSHIFT //<<
+  , AL_BRSHIFT //>>
 
-  AL_UNDEFINED
+  , AL_UNDEFINED
 };
 
 static int arithmetic_lex(const char *src, unsigned size, const char **end)
@@ -1474,6 +1490,62 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
       return AL_DIV;
     case '%':
       return AL_MOD;
+
+    case '|':
+      if(size && src[1] == '|') {
+        ++ *end;
+        return AL_OR;
+      }
+      return AL_BOR;
+
+    case '&':
+      if(size && src[1] == '&') {
+        ++ *end;
+        return AL_AND;
+      }
+      return AL_BAND;
+
+    case '=':
+      if(size && src[1] == '=') {
+        ++ *end;
+        return AL_EQ;
+      }
+      return AL_ASSIGN;
+
+    case '!':
+      if(size && src[1] == '=') {
+        ++ *end;
+        return AL_NE;
+      }
+      return AL_NOT;
+
+    case '>':
+      if(size && src[1] == '=') {
+        ++ *end;
+        return AL_GE;
+      }
+      if(size && src[1] == '>') {
+        ++ *end;
+        return AL_BRSHIFT;
+      }
+      return AL_GT;
+
+    case '<':
+      if(size && src[1] == '=') {
+        ++ *end;
+        return AL_LE;
+      }
+      if(size && src[1] == '<') {
+        ++ *end;
+        return AL_BLSHIFT;
+      }
+      return AL_LT;
+
+    case '~':
+      return AL_BNOT;
+
+    case '^':
+      return AL_BXOR;
 
     default:
       if(isblank(*src)) {
@@ -1512,7 +1584,7 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
         }
 
         //Decimal
-        for(i = 0; i < size; i++) {
+        for(i = 1; i < size; i++) {
           if(src[i] < '0' || src[i] > '9') {
             break;
           }
@@ -1522,17 +1594,19 @@ static int arithmetic_lex(const char *src, unsigned size, const char **end)
       }
 
       if( (*src >= 'A' && *src <= 'Z')
-          || (*src <= 'a' && *src <= 'z')
+          || (*src >= 'a' && *src <= 'z')
           || *src == '_') {
-        for(i = 0; i < size; i++) {
-          if( ! ((*src >= 'A' && *src <= 'Z')
-                 || (*src <= 'a' && *src <= 'z')
-                 || (*src <= '0' && *src <= '9')
-                 || *src == '_')) {
+        for(i = 1; i < size; i++) {
+          if((src[i] >= 'A' && src[i] <= 'Z')
+                 || (src[i] >= 'a' && src[i] <= 'z')
+                 || (src[i] >= '0' && src[i] <= '9')
+                 || src[i] == '_') {
+            *end = &src[i + 1];
+          } else {
             break;
           }
-          *end = &src[i + 1];
         }
+        return AL_VAR;
       }
       break;
   }
@@ -1548,6 +1622,33 @@ typedef struct APARS {
   int unary_postfix;
   struct APARS *prev;
 } APARS;
+/*----------------------------------------------------------------------------*/
+static int op_unary(C_SHELL *sh, int arg, int op, int *dst) {
+  switch (op) {
+    case AL_PLUS:
+      *dst = arg;
+      break;
+    case AL_MINUS:
+      *dst = -1 * arg;
+      break;
+    case AL_INCR:
+      *dst = arg + 1;
+      break;
+    case AL_DECR:
+      *dst = arg - 1;
+      break;
+    case AL_NOT:
+      *dst = !arg;
+      break;
+    case AL_BNOT:
+      *dst = ~arg;
+      break;
+    default:
+      shell_fprintf(sh, SHELL_STDERR, "Invalid unary operator\n");
+      return SHELL_ERR_INVALID_OP;
+  }
+  return SHELL_OK;
+}
 /*----------------------------------------------------------------------------*/
 static int op_binary(C_SHELL *sh, int arg1, int arg2, int op, int *dst) {
   switch(op) {
@@ -1574,42 +1675,101 @@ static int op_binary(C_SHELL *sh, int arg1, int arg2, int op, int *dst) {
       }
       *dst = arg1 % arg2;
       break;
+    case AL_AND:
+      *dst = arg1 && arg2;
+      break;
+    case AL_OR:
+      *dst = arg1 || arg2;
+      break;
+    case AL_BAND:
+      *dst = arg1 & arg2;
+      break;
+    case AL_BOR:
+      *dst = arg1 | arg2;
+      break;
+    case AL_EQ:
+      *dst = arg1 == arg2;
+      break;
+    case AL_NE:
+      *dst = arg1 != arg2;
+      break;
+    case AL_GT:
+      *dst = arg1 > arg2;
+      break;
+    case AL_GE:
+      *dst = arg1 >= arg2;
+      break;
+    case AL_LT:
+      *dst = arg1 < arg2;
+      break;
+    case AL_LE:
+      *dst = arg1 <= arg2;
+      break;
+    case AL_BXOR:
+      *dst = arg1 ^ arg2;
+      break;
+    case AL_BLSHIFT:
+      *dst = arg1 << arg2;
+      break;
+    case AL_BRSHIFT:
+      *dst = arg1 >> arg2;
+      break;
     default:
-      shell_fprintf(sh, SHELL_STDERR, "Invalid arithmetic operator\n");
+      shell_fprintf(sh, SHELL_STDERR, "Invalid binary operator\n");
       return SHELL_ERR_INVALID_OP;
   }
   return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
-static int op_priority(int op) {
+static int op_precedence(int op) {
   switch(op) {
     case AL_PLUS:
     case AL_MINUS:
-      return 0;
+      return 4;
     case AL_INCR:
     case AL_DECR:
       return 1;
     case AL_MUL:
     case AL_DIV:
     case AL_MOD:
+      return 3;
+    case AL_AND:
+      return 11;
+    case AL_OR:
+      return 12;
+    case AL_BAND:
+      return 8;
+    case AL_BOR:
+      return 10;
+    case AL_EQ:
+    case AL_NE:
+      return 7;
+    case AL_GT:
+    case AL_GE:
+    case AL_LT:
+    case AL_LE:
+      return 6;
+    case AL_NOT:
+    case AL_BNOT:
       return 2;
+    case AL_BXOR:
+      return 9;
+    case AL_BLSHIFT:
+    case AL_BRSHIFT:
+      return 5;
   }
   return -1;
 }
 /*----------------------------------------------------------------------------*/
 static int op_operand(C_SHELL *sh, APARS *state, int operand)
 {
-  int ret = 0, priority;
-  switch (state->unary_prefix) {
-    case AL_MINUS:
-      operand = -1 * operand;
-      break;
-    case AL_INCR:
-      operand += 1;
-      break;
-    case AL_DECR:
-      operand -= 1;
-      break;
+  int ret = 0, precedence;
+
+  if(state->unary_prefix) {
+    ret = op_unary(sh, state->unary_prefix, operand, &operand);
+    if(ret < 0) {
+      return ret;
+    }
   }
   state->unary_prefix = 0;
 
@@ -1617,9 +1777,9 @@ static int op_operand(C_SHELL *sh, APARS *state, int operand)
     state->operand[state->operands] = operand;
     state->operands ++;
   } else {
-    //Compary op priority
-    priority = op_priority(state->operator[0]);
-    if(priority >= op_priority(state->operator[1])) {
+    //Compare op priority - precedence
+    precedence = op_precedence(state->operator[0]);
+    if(precedence <= op_precedence(state->operator[1])) {
       ret = op_binary(sh, state->operand[0], state->operand[1], state->operator[0], &state->operand[0]);
       state->operand[1] = operand;
       state->operator[0] = state->operator[1];
@@ -1637,11 +1797,12 @@ static int op_operand(C_SHELL *sh, APARS *state, int operand)
 /**Run arithmetic expression*/
 int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsigned buffer_size)
 {
-  int ret = 0, lex, operand, priority;
+  int ret = 0, lex, operand, lex_count = 0;
   unsigned sz;
   APARS *state, *n;
   const char *p, *end, *v;
-  char name[VAR_NAME_LENGTH];
+  char name[VAR_NAME_LENGTH] = {0};
+  char assign_var[VAR_NAME_LENGTH] = {0};
 
 
   p = src;
@@ -1656,117 +1817,164 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
     while (p - src < size) {
       lex = arithmetic_lex(p, size - (p - src), &end);
 
-      if(lex == AL_VAR || lex == AL_NUMBER) {
-
-        if(state->operands && state->operators < state->operands) {
-          ret = SHELL_ERR_INVALID_OP;
+      switch(lex) {
+        case AL_BLANK:
           break;
-        }
 
-        if(lex == AL_VAR) {
-          sz = end - p;
-          if(sz >= sizeof(name) - 1) {
-            sz = sizeof(name) - 1;
-          }
-          memcpy(name, p, sz);
-          name[sz] = '\0';
-          v = sh_get_var(sh, name);
-          if(v != NULL && *v) {
-            sz = strlen(v);
-            operand = _atoi(v, sz);
-          }
-        }
-
-        if(lex == AL_NUMBER) {
-          operand = _atoi(p, end - p);
-        }
-
-        ret = op_operand(sh, state, operand);
-
-      } else {
-        switch(lex) {
-          case AL_BLANK:
-            break;
-
-         //Binary
-          case AL_PLUS:
-          case AL_MINUS:
-            if(!state->operands || state->operators >= state->operands) {
-              state->unary_prefix = lex;
-            } else {
-              state->operator[state->operators] = lex;
-              state->operators ++;
-            }
-            break;
-          case AL_MUL:
-          case AL_DIV:
-          case AL_MOD:
-            if(!state->operands || state->operators >= state->operands) {
-              ret = SHELL_ERR_INVALID_OP;
-            } else {
-              state->operator[state->operators] = lex;
-              state->operators ++;
-            }
-            break;
-          //Unary
-          case AL_INCR:
-          case AL_DECR:
-            //TODO
-            break;
-
-          case AL_LPAREN:
-            n = (APARS *) cache_alloc(sh->cache, sizeof(APARS));
-            if(n == NULL) {
-              ret = SHELL_ERR_MALLOC;
-              break;
-            }
-            memset(n, 0, sizeof(APARS));
-            n->prev = state;
-            state = n;
-            break;
-
-          case AL_RPAREN:
-            if(state->prev == NULL) {
-              ret = SHELL_ERR_INVALID_OP;
-              break;
-            }
-            if(state->operators && state->operands <= state->operators) {
-              ret = SHELL_ERR_INVALID_OP;
-              break;
-            }
-            if(state->operands > 1) {
-              ret = op_binary(sh, state->operand[0], state->operand[1], state->operator[0], &state->operand[0]);
-              state->operands = 1;
-            }
-
-            if(ret < 0) {
-              break;
-            }
-
-            if(state->operands) {
-              operand = state->operand[0];
-              n = state->prev;
-              cache_free(sh->cache, state);
-              state = n;
-              ret = op_operand(sh, state, operand);
-            } else {
-              n = state->prev;
-              cache_free(sh->cache, state);
-              state = n;
-            }
-            break;
-
-
-          default:
+        case AL_ASSIGN:
+          if(state->operands == 1
+             && !state->operators
+             && lex_count == 1
+             && name[0]) {
+            //Previos lex was variable
+            strncpy(assign_var, name, sizeof(assign_var));
+            state->operands = 0;
+          } else {
             ret = SHELL_ERR_INVALID_OP;
-        }
+          }
+          break;
+
+        case AL_VAR:
+        case AL_NUMBER:
+          if(state->operands && state->operators < state->operands) {
+            ret = SHELL_ERR_INVALID_OP;
+            break;
+          }
+
+          if(lex == AL_VAR) {
+            sz = end - p;
+            if(sz >= sizeof(name) - 1) {
+              sz = sizeof(name) - 1;
+            }
+            memcpy(name, p, sz);
+            name[sz] = '\0';
+            v = sh_get_var(sh, name);
+            if(v != NULL && *v) {
+              sz = strlen(v);
+              operand = _atoi(v, sz);
+            }
+          }
+
+          if(lex == AL_NUMBER) {
+            operand = _atoi(p, end - p);
+          }
+
+          ret = op_operand(sh, state, operand);
+          break;
+
+        //Binary
+        case AL_PLUS:
+        case AL_MINUS:
+          if(!state->operands || state->operators >= state->operands) {
+            state->unary_prefix = lex;
+          } else {
+            state->operator[state->operators] = lex;
+            state->operators ++;
+          }
+          break;
+        case AL_MUL:
+        case AL_DIV:
+        case AL_MOD:
+        case AL_AND:
+        case AL_OR:
+        case AL_BAND:
+        case AL_BOR:
+        case AL_EQ:
+        case AL_NE:
+        case AL_GT:
+        case AL_GE:
+        case AL_LT:
+        case AL_LE:
+        case AL_BXOR:
+        case AL_BLSHIFT:
+        case AL_BRSHIFT:
+          if(!state->operands || state->operators >= state->operands) {
+            ret = SHELL_ERR_INVALID_OP;
+          } else {
+            state->operator[state->operators] = lex;
+            state->operators ++;
+          }
+          break;
+
+          //Unary
+        case AL_NOT:
+        case AL_BNOT:
+          if(!state->operands || state->operators >= state->operands) {
+            //Prefix
+            state->unary_prefix = lex;
+          } else {
+            //Postfix
+            ret = SHELL_ERR_INVALID_OP;
+          }
+          break;
+
+        case AL_INCR:
+        case AL_DECR:
+          if(!state->operands || state->operators >= state->operands) {
+            //Prefix
+            state->unary_prefix = lex;
+          } else {
+            //Postfix
+            ret = op_unary(sh, state->operand[state->operands], lex, &state->operand[state->operands]);
+          }
+          break;
+
+        case AL_LPAREN:
+          n = (APARS *) cache_alloc(sh->cache, sizeof(APARS));
+          if(n == NULL) {
+            ret = SHELL_ERR_MALLOC;
+            break;
+          }
+          memset(n, 0, sizeof(APARS));
+          n->prev = state;
+          state = n;
+          break;
+
+        case AL_RPAREN:
+          if(state->prev == NULL) {
+            ret = SHELL_ERR_INVALID_OP;
+            break;
+          }
+          if(state->operators && state->operands <= state->operators) {
+            ret = SHELL_ERR_INVALID_OP;
+            break;
+          }
+          if(state->operands > 1) {
+            ret = op_binary(sh, state->operand[0], state->operand[1], state->operator[0], &state->operand[0]);
+            state->operands = 1;
+          }
+
+          if(ret < 0) {
+            break;
+          }
+
+          if(state->operands) {
+            operand = state->operand[0];
+            n = state->prev;
+            cache_free(sh->cache, state);
+            state = n;
+            ret = op_operand(sh, state, operand);
+          } else {
+            n = state->prev;
+            cache_free(sh->cache, state);
+            state = n;
+          }
+          break;
+
+
+        default:
+          ret = SHELL_ERR_INVALID_OP;
       }
+
 
       if(ret < 0) {
         break;
       }
 
       p = end;
+      if(lex != AL_BLANK) {
+        lex_count ++;
+      }
     }
 
     if(ret < 0) {
@@ -1794,8 +2002,15 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
       }
       ret = snprintf(buffer, buffer_size, "%d", state->operand[0]);
       buffer[buffer_size - 1] = 0;
+    } else {
+      if(buffer_size) {
+        buffer[0] = 0;
+      }
     }
 
+    if(*assign_var) {
+      sh_set_var(sh, assign_var, buffer);
+    }
 
   } while(0);
 
