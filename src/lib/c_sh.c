@@ -1038,7 +1038,7 @@ int sh_exec(C_SHELL *sh, int argc, char **argv)
 
   if(r >= 0) {
     snprintf(buffer, sizeof(buffer), "%d", r);
-    sh_set_var(sh, "_", buffer);
+    sh_set_var(sh, "?", buffer);
   }
 
   return r;

@@ -1113,6 +1113,47 @@ static const char *subst_find_str(const char *src, unsigned size, const char *wh
   return NULL;
 }
 /*----------------------------------------------------------------------------*/
+static const char *subst_find_rparen(const char *src, unsigned size, int init_count)
+{
+  int quote = 0, lparen;
+  unsigned i;
+
+  lparen = init_count;
+  for(i = 0; i < size; i++) {
+
+    if(src[i] == '\\') {
+      i ++;
+      continue;
+    }
+
+    if(src[i] == '\'') {
+      if(!quote) {
+        quote = src[i];
+      }
+      else {
+        quote = 0;
+      }
+      continue;
+    }
+
+    if(quote)
+      continue;
+
+    if(src[i] == '(') {
+      lparen ++;
+    }
+
+    if(src[i] == ')') {
+      lparen --;
+      if(!lparen) {
+        return &src[i];
+      }
+    }
+
+  }
+  return NULL;
+}
+/*----------------------------------------------------------------------------*/
 int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsigned dst_size)
 {
   static const char delimiters[] = ";|{}/\\+*-=><!$&()\"\'`";
@@ -1172,11 +1213,11 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
           if(size > 1 && p[1] == '(') {
             p ++;
             type = ARITHMETIC_SUBS;
-            if((end = subst_find_str(p, size - (p - src), "))")) == NULL) {
+            if((end = subst_find_rparen(p + 1, size - (p - src) - 1, 2)) == NULL) {
               type = DUMMY_SUBS;
               end = ++ p;
             } else {
-              end += 2;
+              end ++;
               next = subst_find_char(p, size - (p - src), '$');
               if(next != NULL) {
                 p = next;
@@ -1186,7 +1227,7 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
 
           } else {
             type = BRACES_SUBS;
-            if((end = subst_find_char(p, size - (p - src), ')')) == NULL) {
+            if((end = subst_find_rparen(p + 1, size - (p - src) - 1, 1)) == NULL) {
               type = DUMMY_SUBS;
               end = ++ p;
             } else {
@@ -1766,7 +1807,7 @@ static int op_operand(C_SHELL *sh, APARS *state, int operand)
   int ret = 0, precedence;
 
   if(state->unary_prefix) {
-    ret = op_unary(sh, state->unary_prefix, operand, &operand);
+    ret = op_unary(sh, operand, state->unary_prefix, &operand);
     if(ret < 0) {
       return ret;
     }
