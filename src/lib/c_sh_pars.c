@@ -1882,6 +1882,7 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
             break;
           }
 
+          operand = 0;
           if(lex == AL_VAR) {
             sz = end - p;
             if(sz >= sizeof(name) - 1) {
@@ -1956,7 +1957,7 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
             state->unary_prefix = lex;
           } else {
             //Postfix
-            ret = op_unary(sh, state->operand[state->operands], lex, &state->operand[state->operands]);
+            ret = op_unary(sh, state->operand[state->operands - 1], lex, &state->operand[state->operands - 1]);
           }
           break;
 

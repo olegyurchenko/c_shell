@@ -30,6 +30,7 @@ names = ("exit"
 , "read"
 , "tee"
 , "seq"
+, "let"
 )
 
 comma = " "
