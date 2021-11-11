@@ -23,3 +23,11 @@ _=$((0x12345678^0x12345678|0x3456789&0x45678912<<3>>5==5324864))
 echo -n "Test 5 "
 if [ $x == 1 ] ; then echo Ok ; else echo Failed ; fi
 
+n=1000
+i=""
+while let n=n-1 ; do
+let i=++i
+done
+echo -n "Test 6 "
+#echo $i
+if [ $i == 1000 ] ; then echo Ok ; else echo Failed ; fi
