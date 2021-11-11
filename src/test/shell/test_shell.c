@@ -19,7 +19,11 @@
 
 #include <unistd.h>
 #include <sys/stat.h>
- #include <fcntl.h>
+#include <fcntl.h>
+
+#ifdef __MINGW32__
+#define pipe(fds) _pipe(fds, 1024, _O_BINARY)
+#endif
 /*----------------------------------------------------------------------------*/
 static const char *shell_commands[] = {
     "exit"
@@ -45,6 +49,7 @@ static const char *shell_commands[] = {
   , "set"
   , "read"
   , "tea"
+  , "let"
 //  , "test_1" //TEST
 //  , "test_2" //TEST
   , "rr" //test
@@ -63,20 +68,20 @@ typedef struct {
 } stream_handler_t;
 
 static stream_handler_t stream_handler;
-static int _open(void *data, const char* name, SHELL_STREAM_MODE mode);
-static int _close(void *data, int f);
-static int _read(void *data, int f, void* buf, unsigned size);
-static int _write(void *data, int f, const void* buf, unsigned size);
+static int _ts_open(void *data, const char* name, SHELL_STREAM_MODE mode);
+static int _ts_close(void *data, int f);
+static int _ts_read(void *data, int f, void* buf, unsigned size);
+static int _ts_write(void *data, int f, const void* buf, unsigned size);
 /*----------------------------------------------------------------------------*/
 void ts_init(TEST_SHELL_DATA *data)
 {
   int i;
   memset(&stream_handler, 0, sizeof(stream_handler_t));
   stream_handler.handler.data = &stream_handler;
-  stream_handler.handler._open = _open;
-  stream_handler.handler._close = _close;
-  stream_handler.handler._read = _read;
-  stream_handler.handler._write = _write;
+  stream_handler.handler._open = _ts_open;
+  stream_handler.handler._close = _ts_close;
+  stream_handler.handler._read = _ts_read;
+  stream_handler.handler._write = _ts_write;
   //shell_set_stream_handler(data->sh, &stream_handler.handler);
   for(i = 0; i < MAX_STREAM_COUNT; i++) {
     stream_handler.streams[i].mode = -1;
@@ -130,7 +135,7 @@ static int cmd_read(void *arg, int argc, char **argv)
   return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
-static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
+static int _ts_open(void *data, const char* name, SHELL_STREAM_MODE mode)
 {
   stream_handler_t *handler;
   int i, h, r = SHELL_OK;
@@ -200,7 +205,7 @@ static int _open(void *data, const char* name, SHELL_STREAM_MODE mode)
   return r;
 }
 /*----------------------------------------------------------------------------*/
-static int _close(void *data, int f)
+static int _ts_close(void *data, int f)
 {
   stream_handler_t *handler;
   int i;
@@ -224,7 +229,7 @@ static int _close(void *data, int f)
   return SHELL_OK;
 }
 /*----------------------------------------------------------------------------*/
-static int _read(void *data, int f, void* buf, unsigned size)
+static int _ts_read(void *data, int f, void* buf, unsigned size)
 {
   stream_handler_t *handler;
   int i, r = 0;
@@ -248,7 +253,7 @@ static int _read(void *data, int f, void* buf, unsigned size)
   return r;
 }
 /*----------------------------------------------------------------------------*/
-static int _write(void *data, int f, const void* buf, unsigned size)
+static int _ts_write(void *data, int f, const void* buf, unsigned size)
 {
   stream_handler_t *handler;
   int i, r = 0;
