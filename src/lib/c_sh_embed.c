@@ -848,6 +848,11 @@ static int sh_let(C_SHELL *sh, int argc, char **argv)
 
   int ret = SHELL_OK, r = 0, i;
   sh_let_t *data;
+
+  if(!sh_is_true_condition(sh))
+    return 0;
+
+
   data = cache_alloc(sh->cache, sizeof(sh_let_t));
   if(data == NULL) {
     return SHELL_ERR_MALLOC;
