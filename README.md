@@ -20,7 +20,7 @@ c_tty supports basic line editing, understanding the keys:
 
 ## c_sh - shell for embedding your commands
 
-- Built-in commands: "exit", "quit", "break", "continue", "if", "then", "fi", "else", "elif", "true", "false", "while", "until", "for", "do", "done", "echo", "test", "[", "[[", "set", "read", "tee", "seq"
+- Built-in commands: "exit", "quit", "break", "continue", "if", "then", "fi", "else", "elif", "true", "false", "while", "until", "for", "do", "done", "echo", "test", "[", "[[", "set", "read", "tee", "seq", "let"
 
 - FIFO channel support:  cmd1 | cmd2 | cmd3 (with user defined external handler)
 
@@ -29,6 +29,10 @@ c_tty supports basic line editing, understanding the keys:
 - Variable substitutions: $var ${var}
 
 - Command substitutions: $(cmd)  \`cmd\`
+
+- Arithmetic substitutions: $(( expression ))
+
+  
 
   
 

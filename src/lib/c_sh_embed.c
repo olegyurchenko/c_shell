@@ -71,6 +71,7 @@ static int sh_or(C_SHELL *sh, int argc, char **argv);
 static int sh_read(C_SHELL *sh, int argc, char **argv);
 static int sh_tee(C_SHELL *sh, int argc, char **argv);
 static int sh_seq(C_SHELL *sh, int argc, char **argv);
+static int sh_let(C_SHELL *sh, int argc, char **argv);
 /*----------------------------------------------------------------------------*/
 typedef struct {
   unsigned hash;
@@ -105,6 +106,7 @@ static const STD_FN std_fn[] = {
   , {0x7c9d4d41, "read", sh_read}
   , {0x0b88adc3, "tee", sh_tee}
   , {0x0b88a98e, "seq", sh_seq}
+  , { 0x0b888bca, "let", sh_let }
 };
 /*----------------------------------------------------------------------------
 """
@@ -409,7 +411,7 @@ int sh_and(C_SHELL *sh, int argc, char **argv)
   if(!sh_is_true_condition(sh))
     return NOT_TRUE_CONDITION;
 
-  shell_get_int_var(sh, "_", &cond);
+  shell_get_int_var(sh, "?", &cond);
 
   if(argc > 1 && !cond) {
     sh->parser->arg0 ++; //Shift args
@@ -424,7 +426,7 @@ int sh_or(C_SHELL *sh, int argc, char **argv)
   if(!sh_is_true_condition(sh))
     return NOT_TRUE_CONDITION;
 
-  shell_get_int_var(sh, "_", &cond);
+  shell_get_int_var(sh, "?", &cond);
 
   if(argc > 1) {
     sh->parser->arg0 ++; //Shift args
@@ -834,6 +836,36 @@ static int sh_seq(C_SHELL *sh, int argc, char **argv)
     }
   }
 
+  return ret;
+}
+/*----------------------------------------------------------------------------*/
+static int sh_let(C_SHELL *sh, int argc, char **argv)
+{
+  typedef struct {
+    char input_buffer[16 * 1024];
+    char output_buffer[32];
+  } sh_let_t;
+
+  int ret = SHELL_OK, r = 0, i;
+  sh_let_t *data;
+  data = cache_alloc(sh->cache, sizeof(sh_let_t));
+  if(data == NULL) {
+    return SHELL_ERR_MALLOC;
+  }
+  do {
+    for(i = 1; i < argc; i++) {
+      r += snprintf(&data->input_buffer[r], sizeof(data->input_buffer) - r, "%s ", argv[i]);
+    }
+
+    ret = arithmetic(sh, data->input_buffer, r, data->output_buffer, sizeof(data->output_buffer));
+    if(ret < 0) {
+      break;
+    }
+    r = atoi(data->output_buffer);
+    ret = !r;
+
+  } while(0);
+  cache_free(sh->cache, data);
   return ret;
 }
 /*----------------------------------------------------------------------------*/

@@ -6,7 +6,7 @@ if [ 1 != 2 ] ;then echo "Ok";else echo "failed"; fi
 
 echo -n "Test2 "
 [[ 1 == 2 ]]
-if [ ! $_ ] ; then echo "failed";else echo "Ok"; fi
+if [ ! $? ] ; then echo "failed";else echo "Ok"; fi
 
 
 echo -n "Test3 "

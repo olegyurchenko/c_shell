@@ -6,3 +6,4 @@ echo $0
 . var_test.sh
 . redirect_test.sh
 . cmdsubst_test.sh
+. arithmetic.sh
