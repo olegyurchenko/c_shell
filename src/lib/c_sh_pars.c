@@ -2016,7 +2016,7 @@ int arithmetic(C_SHELL *sh, const char *src, unsigned size, char *buffer, unsign
       }
     }
 
-    if(*assign_var) {
+    if(*assign_var && sh_is_true_condition(sh)) {
       sh_set_var(sh, assign_var, buffer);
     }
 
