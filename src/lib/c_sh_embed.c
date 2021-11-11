@@ -411,7 +411,7 @@ int sh_and(C_SHELL *sh, int argc, char **argv)
   if(!sh_is_true_condition(sh))
     return NOT_TRUE_CONDITION;
 
-  shell_get_int_var(sh, "_", &cond);
+  shell_get_int_var(sh, "?", &cond);
 
   if(argc > 1 && !cond) {
     sh->parser->arg0 ++; //Shift args
@@ -426,7 +426,7 @@ int sh_or(C_SHELL *sh, int argc, char **argv)
   if(!sh_is_true_condition(sh))
     return NOT_TRUE_CONDITION;
 
-  shell_get_int_var(sh, "_", &cond);
+  shell_get_int_var(sh, "?", &cond);
 
   if(argc > 1) {
     sh->parser->arg0 ++; //Shift args

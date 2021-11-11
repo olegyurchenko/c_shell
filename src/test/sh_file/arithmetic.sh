@@ -15,18 +15,11 @@ x=$((y=++x+1))
 echo -n "Test 3 "
 if [ $x == 3 -a $y == 3 ] ; then echo Ok ; else echo Failed ; fi
 
-
-x=1
-x=$((y=x++)) 
-#echo $x $y
+_=$((x=((0x33^0x11)+111-122==23)&&(1+2+3*3==12)&&(04553207==0x12d687)))
 echo -n "Test 4 "
-if [ $x == 1 -a $y == 1 ] ; then echo Ok ; else echo Failed ; fi
+if [ $x == 1 ] ; then echo Ok ; else echo Failed ; fi
 
-
-x=1
-y=0
-x=$((y=x&&y)) 
-#echo $x $y
+_=$((0x12345678^0x12345678|0x3456789&0x45678912<<3>>5==5324864))
 echo -n "Test 5 "
-if [ $x == 0 -a $y == 0 ] ; then echo Ok ; else echo Failed ; fi
+if [ $x == 1 ] ; then echo Ok ; else echo Failed ; fi
 

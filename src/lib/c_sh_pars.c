@@ -1080,45 +1080,11 @@ static const char *subst_find_char(const char *src, unsigned size, int what)
   return NULL;
 }
 /*----------------------------------------------------------------------------*/
-static const char *subst_find_str(const char *src, unsigned size, const char *what)
+static const char *subst_find_rparen(const char *src, unsigned size, int count)
 {
   int quote = 0;
-  unsigned i, sz;
-  sz = strlen(what);
-  for(i = 0; i < size; i++) {
-
-    if(src[i] == '\\') {
-      i ++;
-      continue;
-    }
-
-    if(src[i] == '\'') {
-      if(!quote) {
-        quote = src[i];
-      }
-      else {
-        quote = 0;
-      }
-      continue;
-    }
-
-    if(quote)
-      continue;
-
-    if(size - i >= sz
-       && !memcmp(&src[i], what, sz)) {
-      return &src[i];
-    }
-  }
-  return NULL;
-}
-/*----------------------------------------------------------------------------*/
-static const char *subst_find_rparen(const char *src, unsigned size, int init_count)
-{
-  int quote = 0, lparen;
   unsigned i;
 
-  lparen = init_count;
   for(i = 0; i < size; i++) {
 
     if(src[i] == '\\') {
@@ -1140,12 +1106,12 @@ static const char *subst_find_rparen(const char *src, unsigned size, int init_co
       continue;
 
     if(src[i] == '(') {
-      lparen ++;
+      count ++;
     }
 
     if(src[i] == ')') {
-      lparen --;
-      if(!lparen) {
+      count --;
+      if(!count) {
         return &src[i];
       }
     }
@@ -1218,7 +1184,7 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
               end = ++ p;
             } else {
               end ++;
-              next = subst_find_char(p, size - (p - src), '$');
+              next = subst_find_char(p, end - p, '$');
               if(next != NULL) {
                 p = next;
                 continue;
@@ -1232,7 +1198,7 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
               end = ++ p;
             } else {
               end ++;
-              next = subst_find_char(p, size - (p - src), '$');
+              next = subst_find_char(p, end - p, '$');
               if(next != NULL) {
                 p = next;
                 continue;
@@ -1259,7 +1225,7 @@ int sh_make_substs(C_SHELL *sh, const char *src, unsigned size, char *dst, unsig
           end = p;
         } else {
           end ++;
-          next = subst_find_char(p, size - (p - src), '$');
+          next = subst_find_char(p, end - p, '$');
           if(next != NULL) {
             p = next;
             continue;
