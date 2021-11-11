@@ -2,7 +2,7 @@ CC=i686-w64-mingw32-gcc
 CFLAGS=-I../../lib -D WIN_CONSOLE -D WIN32
 LDFLAGS=
 
-EXECUTABLE=shell
+EXECUTABLE=shell.exe
 
 SOURCES= ../shell/main.c \
 ../shell/test_shell.c \
@@ -18,6 +18,14 @@ OBJECTS=$(notdir $(SOURCES:%.c=%.o))
 
 all:  test
 
+ifeq ($(OS),Windows_NT)
+    #Windows stuff
+    WINE = cmd /c
+else
+    #Linux stuff
+    WINE = wine
+endif
+
 $(EXECUTABLE): $(OBJECTS)
 	$(CC) $(CFLAGS) $(OBJECTS) -o $(EXECUTABLE)
 
@@ -31,5 +39,5 @@ clean:
 	rm $(EXECUTABLE) $(OBJECTS)
 
 test: $(EXECUTABLE)
-	./$(EXECUTABLE) all_test.sh
+	$(WINE) $(EXECUTABLE) all_test.sh
 
